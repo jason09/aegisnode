@@ -85,6 +85,380 @@ aegisnode doctor
 - Auth safety checks (JWT secret, OAuth2 `allowHttp` in production)
 - Template directory availability
 
+## Generated Settings Config
+
+`startproject` generates a minimal `settings.js` and runtime defaults fill the rest.
+
+`settings.js` (generated shape):
+
+```js
+export default {
+  appName: 'blog',
+  env: process.env.NODE_ENV || 'development',
+  host: process.env.HOST || '0.0.0.0',
+  port: process.env.PORT ? Number(process.env.PORT) : 3000,
+  security: {
+    appSecret: 'replace-with-strong-secret',
+  },
+  logging: {
+    level: process.env.LOG_LEVEL || 'info',
+  },
+  database: {
+    enabled: false,
+    dialect: 'pg',
+    config: {},
+    options: {},
+  },
+  cache: {
+    enabled: true,
+    driver: 'memory',
+    options: {},
+  },
+  apps: [
+    // AEGIS_APPS_START
+    // AEGIS_APPS_END
+  ],
+};
+```
+
+Notes:
+- Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
+- Add optional blocks manually only when needed: `templates`, `staticDir`, `websocket`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- Any section you omit uses framework defaults from `src/runtime/config.js`.
+
+<!-- SETTINGS_REFERENCE_START -->
+## Settings Reference (All Settings)
+
+All fields below are supported in `settings.js`. If you omit a field, AegisNode uses the runtime default.
+
+Merge order used at startup:
+1. Framework defaults (`defaultConfig`)
+2. `settings.js`
+3. Legacy `settings/index.js` (if present)
+4. Legacy `settings/db.js` (merged into `database`)
+5. Legacy `settings/cache.js` (merged into `cache`)
+6. Legacy `settings/apps.js` (used only when `settings.js` does not define apps)
+7. `environments.default`
+8. `environments[env]` where `env = settings.env` (fallback `NODE_ENV`, then `development`)
+
+### Top-Level
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `appName` | `string` / folder name | Application name used in logs and defaults. |
+| `env` | `string` / `process.env.NODE_ENV || 'development'` | Active environment key for `environments` overrides. |
+| `host` | `string` / `process.env.HOST || '0.0.0.0'` | Bind host for HTTP server. |
+| `port` | `number` / `process.env.PORT || 3000` | Bind port for HTTP server. |
+| `staticDir` | `string \| null` / `null` | Static assets directory, relative to project root (if set). |
+| `templates` | `object \| false` / see templates table | EJS template engine + layout settings. |
+| `security` | `object` / see security tables | Security headers, DDoS limiter, CSRF settings, app secret. |
+| `logging` | `object` / `{ level: 'info' }` | Runtime logger level. |
+| `database` | `object` / see database table | SQL or MongoDB connection settings. |
+| `cache` | `object` / `{ enabled: true, driver: 'memory' }` | Cache backend settings. |
+| `websocket` | `object` / `{ enabled: true, cors: { origin: false } }` | Socket.IO server options. |
+| `api` | `object` / see API table | API-app middleware behavior (JSON enforcement, no-store, CSRF skip for API mounts). |
+| `auth` | `object` / see auth tables | JWT or OAuth2 provider settings. |
+| `swagger` | `object` / see swagger table | OpenAPI JSON + Swagger UI settings. |
+| `architecture` | `object` / `{ strictLayers: false }` | Layering enforcement mode. |
+| `autoMountApps` | `boolean` / `false` | Auto-mount each app route file from `settings.apps`. |
+| `loaders` | `array` / `[]` | Startup loaders run before routes mounting. |
+| `apps` | `array` / `[]` | Declared apps with mount points. |
+| `environments` | `object` / `{}` | Environment-specific deep overrides. |
+
+Notes:
+- `rootDir` is internal and set by runtime; do not manage it manually.
+- Arrays are replaced (not merged) during deep merge.
+
+### Templates (`templates`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable template engine. |
+| `engine` | `string` / `'ejs'` | Template engine. Only `ejs` is supported. |
+| `dir` | `string` / `'templates'` | Templates folder (absolute or relative to project root). |
+| `base` | `string \| false \| null` / `'base'` | Default layout template (without `.ejs`). Set `false`/`null` to disable layout wrapping globally. |
+| `locals` | `object \| function` / `{}` | Global locals. If function, signature is `({ req, res, helpers, jlive }) => object`. |
+
+Layout notes:
+- `res.render('view', data)` renders `view.ejs` and wraps it with `base.ejs` (or configured layout).
+- In layout, both `<%- body %>` and `<%- content %>` are available.
+- Per-render layout override: pass `layout: 'custom-layout'` or `layout: false` in locals.
+
+### Security (`security`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `appSecret` | `string` / `''` | Shared secret for signing security artifacts. Use at least 16 chars. |
+| `headers` | `object` / see headers table | Helmet + CSP configuration. |
+| `ddos` | `object` / see ddos table | `express-rate-limit` based protection. |
+| `csrf` | `object` / see csrf table | CSRF cookie/token behavior. |
+
+#### Security Headers (`security.headers`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable Helmet middleware. |
+| `csp` | `object` / see CSP table | Content Security Policy behavior. |
+
+#### CSP (`security.headers.csp`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable CSP header from Helmet. |
+| `reportOnly` | `boolean` / `false` | Use report-only mode. |
+| `directives` | `object` / `{}` | Directive overrides. Set a directive to `false`/`null` to remove it. |
+
+Default CSP base includes safe defaults such as `defaultSrc 'self'`, `objectSrc 'none'`, `frameAncestors 'none'`, and websocket-aware `connectSrc`.
+
+#### DDoS / Rate Limit (`security.ddos`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable rate limiter. |
+| `windowMs` | `number` / `60000` | Rate limit window in milliseconds. |
+| `maxRequests` | `number` / `120` | Max requests per window per key. |
+| `message` | `string` / `'Too many requests, please try again later.'` | JSON error message text. |
+| `statusCode` | `number` / `429` | Response status code when limited. |
+| `standardHeaders` | `boolean` / `true` | Emit modern rate-limit headers. |
+| `legacyHeaders` | `boolean` / `false` | Emit legacy `X-RateLimit-*` headers. |
+| `skipSuccessfulRequests` | `boolean` / `false` | Do not count successful responses. |
+| `skipFailedRequests` | `boolean` / `false` | Do not count failed responses. |
+| `trustProxy` | `boolean \| number \| string` / `false` | Express `trust proxy` value used for limiter IP resolution. |
+| `store` | `object \| null` / `null` | Custom rate-limit store implementation. |
+| `skipPaths` | `string[]` / `['/health']` | Path prefixes excluded from limiter. |
+
+#### CSRF (`security.csrf`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable CSRF middleware. |
+| `rejectForms` | `boolean` / `true` | Enforce CSRF on form submissions. |
+| `rejectUnsafeMethods` | `boolean` / `true` | Enforce CSRF for unsafe methods (`POST/PUT/PATCH/DELETE`) in general. |
+| `cookieName` | `string` / `'_aegis_csrf'` | CSRF cookie name. |
+| `fieldName` | `string` / `'_csrf'` | Body form field name for CSRF token. |
+| `headerName` | `string` / `'x-csrf-token'` | Header token key (normalized lowercase). |
+| `requireSignedCookie` | `boolean` / `true` | Require signed CSRF cookie values. |
+| `sameSite` | `'lax' \| 'strict' \| 'none' \| false` / `'lax'` | CSRF cookie same-site mode. |
+| `secure` | `boolean \| 'auto'` / `'auto'` | Secure cookie flag (`auto` respects request security). |
+| `httpOnly` | `boolean` / `true` | Make CSRF cookie httpOnly. |
+| `path` | `string` / `'/'` | CSRF cookie path. |
+
+CSRF notes:
+- With `requireSignedCookie: true` (default), `security.appSecret` must be strong (minimum 16 chars) or startup fails.
+- CSRF is skipped for configured API app mounts when `api.disableCsrf: true`.
+- CSRF is skipped on built-in OAuth2 server endpoints.
+
+### Logging (`logging`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `level` | `'error' \| 'warn' \| 'info' \| 'debug' \| 'trace'` / `'info'` | Logger verbosity threshold. |
+
+### Database (`database`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable database bootstrap. |
+| `dialect` | `string` / `'pg'` | SQL: `mysql`, `pg`/`postgres`/`postgresql`, `sqlite`, `mssql`, `oracle`; NoSQL: `mongo`/`mongodb`. |
+| `config` | `object` / `{}` | Connection options passed to database driver. |
+| `options` | `object` / `{}` | Extra options (used directly for Mongo when enabled). |
+| `uri` | `string` / unset | Legacy Mongo URI fallback (still accepted). Prefer `config.connectionString`. |
+
+Mongo config shortcuts accepted in `database.config`:
+- `connectionString` (preferred)
+- or `server`/`host`, `port`, `database`/`dbName`, `user`/`username`, `password`
+
+### Cache (`cache`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable cache service. |
+| `driver` | `string` / `'memory'` | Cache driver. Currently only `memory` is built-in. |
+| `options` | `object` / `{}` | Reserved for future/custom drivers. |
+
+### WebSocket (`websocket`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable Socket.IO server. |
+| `cors` | `object` / `{ origin: false }` | Passed directly to Socket.IO `cors` option. |
+
+### API (`api`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `apps` | `string[]` / `[]` | App names treated as API apps. Mounts are resolved from `settings.apps`. |
+| `disableCsrf` | `boolean` / `true` | Skip CSRF checks for API app mounts. |
+| `requireJsonForUnsafeMethods` | `boolean` / `true` | Reject unsafe API payloads unless `Content-Type` is JSON (`415`). |
+| `noStoreHeaders` | `boolean` / `true` | Set `Cache-Control: no-store` on API responses. |
+
+### Auth (`auth`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable auth manager. |
+| `provider` | `'jwt' \| 'oauth2'` / `'jwt'` | Active auth provider. |
+| `tablePrefix` | `string` / `'aegisnode'` | Prefix for auth storage namespaces/tables; sanitized to lowercase `[a-z0-9_]`. |
+| `storage` | `object` / see storage table | Persistence backend for auth state. |
+| `jwt` | `object` / see jwt table | JWT configuration. |
+| `oauth2` | `object` / see oauth2 table | OAuth2 server and token configuration. |
+
+#### Auth Storage (`auth.storage`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `driver` | `'cache' \| 'memory' \| 'file' \| 'database'` / `'cache'` | Storage backend for revocations/clients/tokens. |
+| `filePath` | `string` / `'storage/aegisnode-auth-store.json'` | Used when `driver: 'file'`. Relative to project root if not absolute. |
+| `tableName` | `string` / `'aegisnode_auth_store'` (prefix-based) | Used when `driver: 'database'` for SQL table or Mongo collection. |
+| `collectionName` | `string` / alias only | Legacy alias; if set and `tableName` missing, it becomes `tableName`. |
+
+#### JWT (`auth.jwt`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `secret` | `string` / `security.appSecret` fallback | Signing secret. Required for JWT auth. |
+| `algorithm` | `'HS256' \| 'HS384' \| 'HS512'` / `'HS256'` | JWT HMAC algorithm. |
+| `issuer` | `string` / `appName` | JWT issuer claim. |
+| `audience` | `string` / `appName` | JWT audience claim. |
+| `expiresIn` | `string` / `'15m'` | Access token TTL. |
+| `refreshExpiresIn` | `string` / `'7d'` | Refresh token TTL. |
+
+#### OAuth2 Core (`auth.oauth2`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `accessTokenTtlSeconds` | `number` / `3600` | Access token TTL in seconds. |
+| `refreshTokenTtlSeconds` | `number` / `1209600` | Refresh token TTL in seconds. |
+| `authorizationCodeTtlSeconds` | `number` / `600` | Authorization code TTL in seconds. |
+| `rotateRefreshToken` | `boolean` / `true` | Rotate refresh token on refresh flow. |
+| `requireClientSecret` | `boolean` / `true` | Require secret for confidential client flows. |
+| `requirePkce` | `boolean` / `true` | Require PKCE for authorization_code flow. |
+| `allowPlainPkce` | `boolean` / `false` | Allow PKCE `plain` method. |
+| `grants` | `string[]` / `['authorization_code','refresh_token','client_credentials']` | Enabled OAuth2 grants. |
+| `defaultScopes` | `string[]` / `[]` | Scopes assigned when none requested/provided. |
+| `clientAuthMethod` | `'client_secret_basic' \| 'client_secret_post' \| 'none'` / `'client_secret_basic'` | Default client authentication method. |
+| `server` | `object` / see OAuth2 server table | Built-in authorization server endpoint settings. |
+
+#### OAuth2 Server (`auth.oauth2.server`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Mount built-in OAuth2 endpoints. |
+| `basePath` | `string` / `'/oauth'` | Base path used to derive endpoint defaults. |
+| `authorizePath` | `string` / `'/oauth/authorize'` | Authorization endpoint path. |
+| `tokenPath` | `string` / `'/oauth/token'` | Token endpoint path. |
+| `introspectionPath` | `string` / `'/oauth/introspect'` | Introspection endpoint path. |
+| `revocationPath` | `string` / `'/oauth/revoke'` | Revocation endpoint path. |
+| `metadataPath` | `string` / `'/.well-known/oauth-authorization-server'` | OAuth2 metadata endpoint path. |
+| `issuer` | `string` / `server.baseUrl` fallback, then `appName` | Issuer value in OAuth2 metadata/tokens. |
+| `baseUrl` | `string` / optional alias | Alias used as fallback for `issuer` when `issuer` is empty. |
+| `autoApprove` | `boolean` / `true` | Auto-approve auth requests once subject is resolved. |
+| `requireAuthenticatedUser` | `boolean` / `true` | Require authenticated user/subject for authorize endpoint. |
+| `requireConsent` | `boolean` / `false` | Require explicit consent before issuing auth code. |
+| `allowSubjectFromParams` | `boolean` / `false` | Allow subject from request params (`subject`/`user_id`). Keep disabled in production. |
+| `allowHttp` | `boolean` / `false` | Allow OAuth2 endpoints on non-HTTPS requests. Keep `false` in production. |
+| `resolveSubject` | `function \| null` / `null` | Hook to resolve subject: `({ req, params, client }) => string|null`. |
+| `resolveConsent` | `function \| null` / `null` | Hook to resolve consent: `({ req, params, client, subject }) => boolean`. |
+
+### Swagger (`swagger`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable Swagger UI + OpenAPI JSON endpoints. |
+| `docsPath` | `string` / `'/docs'` | Swagger UI route. |
+| `jsonPath` | `string` / `'/openapi.json'` | OpenAPI JSON route. |
+| `document` | `object \| null` / `null` | Inline OpenAPI document object. |
+| `documentPath` | `string` / `'openapi.json'` | JSON file path used when `document` is not provided. |
+| `explorer` | `boolean` / `true` | Enable Swagger UI explorer mode. |
+
+### Architecture (`architecture`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `strictLayers` | `boolean` / `false` | Enforce `route -> validator -> service -> model` restrictions. |
+
+### Auto Mount (`autoMountApps`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `autoMountApps` | `boolean` / `false` | If `true`, each `apps/<name>/routes.js` is mounted automatically from `settings.apps`. If `false`, central `routes.js` controls mounting. |
+
+### Loaders (`loaders`)
+
+`loaders` accepts an array of entries run in order during startup:
+
+1. Function entry:
+
+```js
+loaders: [
+  async ({ logger, options, config }) => {
+    logger.info('loader ran');
+  },
+]
+```
+
+2. Path entry (relative or absolute):
+
+```js
+loaders: ['loaders/init-db.js']
+```
+
+3. Object entry with options:
+
+```js
+loaders: [
+  { path: 'loaders/init-queue.js', options: { queue: 'jobs' } },
+]
+```
+
+Each loader module must export a function (default export preferred).
+
+### Apps (`apps`)
+
+`apps` supports two forms:
+
+```js
+apps: ['users', 'billing']
+```
+
+or
+
+```js
+apps: [
+  { name: 'users', mount: '/users' },
+  { name: 'billing', mount: '/payments' },
+]
+```
+
+Rules:
+- `name` is required in object form.
+- `mount` defaults to `/${name}`.
+- Mounts are normalized to a single leading slash (except root `/`).
+
+### Environment Overrides (`environments`)
+
+Example:
+
+```js
+environments: {
+  default: {
+    logging: { level: 'debug' },
+  },
+  production: {
+    logging: { level: 'warn' },
+    security: { ddos: { maxRequests: 80 } },
+  },
+}
+```
+
+Behavior:
+- Base config loads first.
+- `environments.default` is merged next (if present).
+- `environments[env]` is merged last.
+- Arrays in overrides replace full arrays from base.
+
+<!-- SETTINGS_REFERENCE_END -->
+
 ## App File Usage Examples
 
 Each generated app usually contains:
@@ -367,7 +741,7 @@ auth: {
       autoApprove: true,
       requireAuthenticatedUser: true,
       requireConsent: false,
-      allowHttp: true,
+      allowHttp: false,
     },
   },
 },
@@ -643,7 +1017,7 @@ auth: {
 
 8. Production checklist
 
-- Set `auth.oauth2.server.allowHttp = false`.
+- Keep `auth.oauth2.server.allowHttp = false` (default).
 - Use HTTPS with trusted reverse proxy config.
 - Keep `requirePkce = true`.
 - Use strong client secrets and rotate regularly.
@@ -1105,6 +1479,7 @@ security: {
     cookieName: '_aegis_csrf',
     fieldName: '_csrf',
     headerName: 'x-csrf-token',
+    requireSignedCookie: true,
     sameSite: 'lax',
     secure: 'auto',
     httpOnly: true,
@@ -1113,7 +1488,7 @@ security: {
 }
 ```
 
-`security.appSecret` should be strong (at least 16 chars). It is used to sign CSRF cookies.
+`security.appSecret` should be strong (at least 16 chars). It is used to sign CSRF cookies and is required when `security.csrf.requireSignedCookie` is true (default).
 If you run behind a reverse proxy, set `security.ddos.trustProxy` (for example `1`) so client IP and secure-cookie detection are correct.
 
 Set `security.headers.enabled = false` to disable Helmet.

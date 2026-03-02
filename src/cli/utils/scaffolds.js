@@ -44,191 +44,19 @@ export function renderProjectSettings(projectName, appSecret, apps) {
   return `export default {
   appName: '${projectName}',
   env: process.env.NODE_ENV || 'development',
-  // Keep one settings.js and override per environment here.
-  // environments: {
-  //   development: {
-  //     logging: { level: 'debug' },
-  //   },
-  //   production: {
-  //     logging: { level: 'warn' },
-  //     security: { ddos: { maxRequests: 80 } },
-  //   },
-  // },
   host: process.env.HOST || '0.0.0.0',
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
   security: {
     // Used to sign security tokens/cookies. Replace with a strong secret in production.
     appSecret: '${appSecret}',
-    headers: {
-      enabled: true,
-      csp: {
-        enabled: true,
-        reportOnly: false,
-        // Example override:
-        // directives: { imgSrc: ["'self'", 'data:', 'https://cdn.example.com'] },
-        directives: {},
-      },
-    },
-    ddos: {
-      enabled: true,
-      windowMs: 60000,
-      maxRequests: 120,
-      message: 'Too many requests, please try again later.',
-      statusCode: 429,
-      standardHeaders: true,
-      legacyHeaders: false,
-      skipSuccessfulRequests: false,
-      skipFailedRequests: false,
-      trustProxy: false,
-      // Do not count health checks.
-      skipPaths: ['/health'],
-    },
-    csrf: {
-      enabled: true,
-      // Reject form submissions without CSRF token.
-      rejectForms: true,
-      // Also protect JSON/API unsafe methods (POST/PUT/PATCH/DELETE).
-      rejectUnsafeMethods: true,
-      cookieName: '_aegis_csrf',
-      fieldName: '_csrf',
-      headerName: 'x-csrf-token',
-      sameSite: 'lax',
-      secure: 'auto',
-      httpOnly: true,
-      path: '/',
-    },
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
   },
-  // Set to a folder name (e.g. 'public') when you want static file serving.
-  staticDir: null,
-  templates: {
-    enabled: true,
-    engine: 'ejs',
-    // Folder that contains your EJS templates (relative to project root).
-    dir: 'templates',
-    // Default base layout template name (base.ejs). Set to false to disable layout wrapping.
-    base: 'base',
-    // Global locals injected into every template render.
-    // Supports functions/classes as values.
-    // locals: {
-    //   formatCurrency: (value) => '$' + Number(value || 0).toFixed(2),
-    //   ViewBag: class ViewBag {},
-    // },
-  },
-  websocket: {
-    enabled: true,
-    cors: {
-      // Set allowed origins explicitly (string/array/regex/function).
-      // Keep false to deny cross-origin websocket/polling requests.
-      origin: false,
-    },
-  },
-  auth: {
-    // Enable auth subsystem and choose provider: 'jwt' or 'oauth2'.
-    enabled: false,
-    provider: 'jwt',
-    // Logical table/key prefix used by the auth subsystem.
-    // Example generated names: aegisnode_users, aegisnode_oauth_clients...
-    tablePrefix: 'aegisnode',
-    storage: {
-      // 'cache' uses configured cache driver, 'memory' is process-only,
-      // 'file' persists to disk, 'database' persists using settings.database.
-      driver: 'cache',
-      // Used only when driver = 'file' (relative to project root if not absolute).
-      filePath: 'storage/aegisnode-auth-store.json',
-      // Used when driver = 'database' for both SQL table and Mongo collection.
-      tableName: 'aegisnode_auth_store',
-    },
-    jwt: {
-      // Leave empty to fallback to security.appSecret.
-      secret: '',
-      algorithm: 'HS256',
-      expiresIn: '15m',
-      refreshExpiresIn: '7d',
-      issuer: '${projectName}',
-      audience: '${projectName}',
-    },
-    oauth2: {
-      accessTokenTtlSeconds: 3600,
-      refreshTokenTtlSeconds: 1209600,
-      authorizationCodeTtlSeconds: 600,
-      rotateRefreshToken: true,
-      requireClientSecret: true,
-      requirePkce: true,
-      allowPlainPkce: false,
-      grants: ['authorization_code', 'refresh_token', 'client_credentials'],
-      defaultScopes: [],
-      // Default auth method for confidential clients:
-      // 'client_secret_basic' | 'client_secret_post' | 'none'
-      clientAuthMethod: 'client_secret_basic',
-      server: {
-        // Set false if you want to mount OAuth2 endpoints manually.
-        enabled: true,
-        basePath: '/oauth',
-        authorizePath: '/oauth/authorize',
-        tokenPath: '/oauth/token',
-        introspectionPath: '/oauth/introspect',
-        revocationPath: '/oauth/revoke',
-        metadataPath: '/.well-known/oauth-authorization-server',
-        // Leave empty to use request host as issuer.
-        issuer: '',
-        // If true, /authorize auto-approves and redirects when subject is resolved.
-        autoApprove: true,
-        // Require authenticated subject on /authorize.
-        requireAuthenticatedUser: true,
-        // If true, /authorize requires approve=true in query/body (or custom resolveConsent hook).
-        requireConsent: false,
-        // Keep false in production. Set true only for local HTTP testing.
-        allowHttp: true,
-      },
-    },
-  },
-  api: {
-    // Declare app names that are API apps.
-    // Example: ['users', 'auth']
-    apps: [],
-    // Skip CSRF validation for API app mounts (recommended for token/JWT APIs).
-    disableCsrf: true,
-    // Reject unsafe API payloads unless content-type is application/json.
-    requireJsonForUnsafeMethods: true,
-    // Add no-store cache header for API responses.
-    noStoreHeaders: true,
-  },
-  swagger: {
-    // Enable Swagger UI/OpenAPI endpoints.
-    enabled: false,
-    // Swagger UI page route.
-    docsPath: '/docs',
-    // Raw OpenAPI JSON endpoint.
-    jsonPath: '/openapi.json',
-    // Relative path to OpenAPI JSON file (used when swagger.document is not provided).
-    documentPath: 'openapi.json',
-    explorer: true,
-  },
-  architecture: {
-    // Strict layer mode: route -> validator -> service -> model.
-    // - Routes cannot import models or DB libraries.
-    // - Services cannot access dbClient/database or import DB libraries directly.
-    strictLayers: false,
-  },
-  // If true, each app routes.js is auto-mounted using settings.apps mount values.
-  // Keep false to centralize routing in routes.js.
-  autoMountApps: false,
   database: {
     enabled: false,
     dialect: 'pg',
-    config: {
-      // SQL example:
-      server: 'localhost',
-      port: 5432,
-      user: 'postgres',
-      password: 'postgres',
-      database: 'appdb',
-      // Mongo example:
-      // connectionString: 'mongodb://localhost:27017/appdb',
-    },
+    config: {},
     options: {},
   },
   cache: {
@@ -236,8 +64,11 @@ export function renderProjectSettings(projectName, appSecret, apps) {
     driver: 'memory',
     options: {},
   },
-  // Custom loaders (absolute path or path relative to project root)
-  loaders: [],
+
+  // Optional sections you can add manually when needed:
+  // templates, staticDir, websocket, auth, api, swagger,
+  // architecture, loaders, environments, security.headers/ddos/csrf
+
   apps: [
     // AEGIS_APPS_START
 ${renderAppEntries(apps, '    ')}
@@ -246,7 +77,6 @@ ${renderAppEntries(apps, '    ')}
 };
 `;
 }
-
 export function renderSettingsApps(apps) {
   return `const apps = [
   // AEGIS_APPS_START

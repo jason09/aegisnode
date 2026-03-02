@@ -501,6 +501,7 @@ async function main() {
         oauth2: {
           server: {
             allowHttp: true,
+            resolveSubject: () => 'u1',
           },
         },
       },
@@ -529,7 +530,6 @@ async function main() {
   authorizeUrl.searchParams.set('redirect_uri', 'http://127.0.0.1/callback');
   authorizeUrl.searchParams.set('scope', 'read:users');
   authorizeUrl.searchParams.set('state', 's123');
-  authorizeUrl.searchParams.set('subject', 'u1');
   authorizeUrl.searchParams.set('code_challenge', pkce.challenge);
   authorizeUrl.searchParams.set('code_challenge_method', 'S256');
 
@@ -974,14 +974,11 @@ async function main() {
 
   const settingsFile = path.join(projectRoot, 'settings.js');
   const settingsBeforeStrict = await fs.readFile(settingsFile, 'utf8');
-  await fs.writeFile(
-    settingsFile,
-    settingsBeforeStrict.replace(
-      'autoMountApps: false,',
-      "architecture: {\n    strictLayers: true,\n  },\n  autoMountApps: true,",
-    ),
-    'utf8',
+  const settingsWithStrictLayers = settingsBeforeStrict.replace(
+    /\n\s*apps:\s*\[/,
+    "\n  architecture: {\n    strictLayers: true,\n  },\n  autoMountApps: true,\n  apps: [",
   );
+  await fs.writeFile(settingsFile, settingsWithStrictLayers, 'utf8');
 
   await fs.writeFile(
     path.join(projectRoot, 'apps', 'users', 'models.js'),
@@ -1035,8 +1032,10 @@ async function main() {
   await fs.writeFile(path.join(projectRoot, 'apps', 'users', 'routes.js'), strictUsersRoutes, 'utf8');
 
   const currentSettings = await fs.readFile(settingsFile, 'utf8');
-  const updatedSettings = currentSettings
-    .replace("dir: 'templates'", "dir: 'ui'");
+  const updatedSettings = currentSettings.replace(
+    /\n\s*apps:\s*\[/,
+    "\n  templates: {\n    dir: 'ui',\n  },\n  apps: [",
+  );
   await fs.writeFile(settingsFile, updatedSettings, 'utf8');
 
   await fs.mkdir(path.join(projectRoot, 'ui'), { recursive: true });

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 import jwt from 'jsonwebtoken';
 
 const SUPPORTED_PROVIDERS = new Set(['jwt', 'oauth2']);
@@ -21,6 +22,7 @@ const SUPPORTED_OAUTH2_CLIENT_AUTH_METHODS = new Set([
   'none',
 ]);
 const SUPPORTED_OAUTH2_PKCE_METHODS = new Set(['S256', 'plain']);
+const scryptAsync = promisify(crypto.scrypt);
 
 function isPlainObject(value) {
   return Boolean(value) && Object.prototype.toString.call(value) === '[object Object]';
@@ -172,9 +174,8 @@ function normalizeOAuth2ServerConfig(rawServer, appName) {
     autoApprove: server.autoApprove !== false,
     requireAuthenticatedUser: server.requireAuthenticatedUser !== false,
     requireConsent: asBoolean(server.requireConsent, false),
-    allowHttp: typeof server.allowHttp === 'boolean'
-      ? server.allowHttp
-      : process.env.NODE_ENV !== 'production',
+    allowSubjectFromParams: asBoolean(server.allowSubjectFromParams, false),
+    allowHttp: asBoolean(server.allowHttp, false),
     resolveSubject: typeof server.resolveSubject === 'function' ? server.resolveSubject : null,
     resolveConsent: typeof server.resolveConsent === 'function' ? server.resolveConsent : null,
   };
@@ -373,10 +374,11 @@ function buildUrlWithQuery(baseUrl, params) {
 }
 
 function resolveRequestOrigin(req) {
-  const forwardedProto = asNonEmptyString(req?.headers?.['x-forwarded-proto']).split(',')[0].trim();
-  const protocol = forwardedProto || (req?.protocol || 'http');
-  const forwardedHost = asNonEmptyString(req?.headers?.['x-forwarded-host']).split(',')[0].trim();
-  const host = forwardedHost || asNonEmptyString(req?.headers?.host, 'localhost');
+  const protocol = asNonEmptyString(req?.protocol, req?.secure === true ? 'https' : 'http');
+  const host = asNonEmptyString(
+    typeof req?.get === 'function' ? req.get('host') : req?.headers?.host,
+    'localhost',
+  );
   return `${protocol}://${host}`;
 }
 
@@ -413,6 +415,12 @@ function hashClientSecret(secret) {
   return `scrypt$${salt}$${derived}`;
 }
 
+async function hashClientSecretAsync(secret) {
+  const salt = randomToken(16);
+  const derivedBuffer = await scryptAsync(String(secret || ''), salt, 32);
+  return `scrypt$${salt}$${Buffer.from(derivedBuffer).toString('hex')}`;
+}
+
 function verifyClientSecret(secret, storedHash) {
   const rawHash = String(storedHash || '');
   if (!rawHash) {
@@ -431,6 +439,28 @@ function verifyClientSecret(secret, storedHash) {
   const salt = parts[1];
   const expected = parts[2];
   const derived = crypto.scryptSync(String(secret || ''), salt, 32).toString('hex');
+  return constantTimeEqual(derived, expected);
+}
+
+async function verifyClientSecretAsync(secret, storedHash) {
+  const rawHash = String(storedHash || '');
+  if (!rawHash) {
+    return false;
+  }
+
+  if (!rawHash.startsWith('scrypt$')) {
+    return constantTimeEqual(secret, rawHash);
+  }
+
+  const parts = rawHash.split('$');
+  if (parts.length !== 3) {
+    return false;
+  }
+
+  const salt = parts[1];
+  const expected = parts[2];
+  const derivedBuffer = await scryptAsync(String(secret || ''), salt, 32);
+  const derived = Buffer.from(derivedBuffer).toString('hex');
   return constantTimeEqual(derived, expected);
 }
 
@@ -485,32 +515,42 @@ function createFileStoreAdapter(filePath, rootDir, logger) {
   }
 
   const map = new Map(Object.entries(snapshot));
-  const flush = () => {
-    try {
-      const payload = JSON.stringify(Object.fromEntries(map), null, 2);
-      fs.writeFileSync(resolvedPath, `${payload}\n`, 'utf8');
-    } catch (error) {
-      logger.warn('Auth file store write failed at %s: %s', resolvedPath, error?.message || String(error));
-    }
+  let writeQueue = Promise.resolve();
+
+  const flush = async () => {
+    const payload = JSON.stringify(Object.fromEntries(map), null, 2);
+    await fs.promises.writeFile(resolvedPath, `${payload}\n`, 'utf8');
+  };
+
+  const enqueueFlush = () => {
+    writeQueue = writeQueue
+      .then(() => flush())
+      .catch((error) => {
+        logger.warn('Auth file store write failed at %s: %s', resolvedPath, error?.message || String(error));
+      });
+    return writeQueue;
   };
 
   return {
     get: (key) => map.get(key),
     set: (key, value) => {
       map.set(key, value);
-      flush();
+      enqueueFlush();
       return value;
     },
     delete: (key) => {
       const deleted = map.delete(key);
       if (deleted) {
-        flush();
+        enqueueFlush();
       }
       return deleted;
     },
+    ready: Promise.resolve(),
+    close: async () => {
+      await writeQueue;
+    },
   };
 }
-
 function isTableExistsError(error) {
   const message = String(error?.message || '').toLowerCase();
   return (
@@ -617,6 +657,40 @@ function createDatabaseStoreAdapter({ config, database, logger }) {
     await sqlClient.table(storeTableName).insert(rows).run();
   };
 
+  const upsertSqlEntry = async (key, value) => {
+    if (!sqlClient || typeof sqlClient.table !== 'function') {
+      return false;
+    }
+
+    const table = sqlClient.table(storeTableName);
+    if (typeof table.where !== 'function') {
+      return false;
+    }
+
+    await table.where('id', key).delete().run();
+    await sqlClient.table(storeTableName).insert([
+      {
+        id: key,
+        payload: JSON.stringify(value),
+      },
+    ]).run();
+    return true;
+  };
+
+  const deleteSqlEntry = async (key) => {
+    if (!sqlClient || typeof sqlClient.table !== 'function') {
+      return false;
+    }
+
+    const table = sqlClient.table(storeTableName);
+    if (typeof table.where !== 'function') {
+      return false;
+    }
+
+    await table.where('id', key).delete().run();
+    return true;
+  };
+
   const loadFromMongo = async () => {
     if (!mongoCollection || typeof mongoCollection.find !== 'function') {
       return;
@@ -652,6 +726,28 @@ function createDatabaseStoreAdapter({ config, database, logger }) {
     await mongoCollection.insertMany(docs, { ordered: false });
   };
 
+  const upsertMongoEntry = async (key, value) => {
+    if (!mongoCollection || typeof mongoCollection.updateOne !== 'function') {
+      return false;
+    }
+
+    await mongoCollection.updateOne(
+      { _id: key },
+      { $set: { payload: value } },
+      { upsert: true },
+    );
+    return true;
+  };
+
+  const deleteMongoEntry = async (key) => {
+    if (!mongoCollection || typeof mongoCollection.deleteOne !== 'function') {
+      return false;
+    }
+
+    await mongoCollection.deleteOne({ _id: key });
+    return true;
+  };
+
   const ready = (async () => {
     if (!database) {
       logger.warn('Auth storage driver "database" selected but database is disabled; using in-memory auth store.');
@@ -683,20 +779,32 @@ function createDatabaseStoreAdapter({ config, database, logger }) {
   });
   writeQueue = ready;
 
-  const persist = async () => {
+  const persist = async (operation = null) => {
     if (backend === 'sql') {
+      if (operation?.type === 'set' && await upsertSqlEntry(operation.key, operation.value)) {
+        return;
+      }
+      if (operation?.type === 'delete' && await deleteSqlEntry(operation.key)) {
+        return;
+      }
       await flushToSql();
       return;
     }
 
     if (backend === 'mongo') {
+      if (operation?.type === 'set' && await upsertMongoEntry(operation.key, operation.value)) {
+        return;
+      }
+      if (operation?.type === 'delete' && await deleteMongoEntry(operation.key)) {
+        return;
+      }
       await flushToMongo();
     }
   };
 
-  const enqueuePersist = () => {
+  const enqueuePersist = (operation = null) => {
     writeQueue = writeQueue
-      .then(() => persist())
+      .then(() => persist(operation))
       .catch((error) => {
         logger.warn('Auth database store flush failed: %s', error?.message || String(error));
       });
@@ -707,13 +815,13 @@ function createDatabaseStoreAdapter({ config, database, logger }) {
     get: (key) => map.get(key),
     set: (key, value) => {
       map.set(key, value);
-      enqueuePersist();
+      enqueuePersist({ type: 'set', key, value });
       return value;
     },
     delete: (key) => {
       const deleted = map.delete(key);
       if (deleted) {
-        enqueuePersist();
+        enqueuePersist({ type: 'delete', key });
       }
       return deleted;
     },
@@ -724,7 +832,6 @@ function createDatabaseStoreAdapter({ config, database, logger }) {
     },
   };
 }
-
 function createStoreAdapter({ config, cache, rootDir, logger, database }) {
   const noopClose = async () => {};
 
@@ -750,10 +857,11 @@ function createStoreAdapter({ config, cache, rootDir, logger, database }) {
   }
 
   if (config.storage.driver === 'file') {
+    const adapter = createFileStoreAdapter(config.storage.filePath, rootDir, logger);
     return {
-      adapter: createFileStoreAdapter(config.storage.filePath, rootDir, logger),
-      ready: Promise.resolve(),
-      close: noopClose,
+      adapter,
+      ready: adapter.ready || Promise.resolve(),
+      close: typeof adapter.close === 'function' ? adapter.close : noopClose,
     };
   }
 
@@ -1148,6 +1256,79 @@ function createOAuth2Manager({ config, storeAdapter }) {
     });
   }
 
+  async function authenticateClientCredentialsAsync({
+    clientId,
+    clientSecret = '',
+    allowPublicClient = false,
+  } = {}) {
+    const id = asNonEmptyString(clientId);
+    if (!id) {
+      throw createOAuthError('invalid_client', 'Missing client_id.', 401, {
+        shouldRedirect: false,
+        wwwAuthenticate: 'Basic realm="oauth2"',
+      });
+    }
+
+    const client = getClient(id);
+    if (!client) {
+      throw createOAuthError('invalid_client', 'Unknown client.', 401, {
+        shouldRedirect: false,
+        wwwAuthenticate: 'Basic realm="oauth2"',
+      });
+    }
+
+    const secret = asNonEmptyString(clientSecret);
+    const authMethod = client.tokenEndpointAuthMethod || oauthConfig.clientAuthMethod || 'client_secret_basic';
+    const isPublic = client.publicClient === true || authMethod === 'none';
+
+    if (isPublic) {
+      if (!allowPublicClient) {
+        throw createOAuthError('invalid_client', 'Public client cannot authenticate on this endpoint.', 401, {
+          shouldRedirect: false,
+          wwwAuthenticate: 'Basic realm="oauth2"',
+        });
+      }
+
+      if (secret && !await verifyClientSecretAsync(secret, client.clientSecretHash)) {
+        throw createOAuthError('invalid_client', 'Invalid client credentials.', 401, {
+          shouldRedirect: false,
+          wwwAuthenticate: 'Basic realm="oauth2"',
+        });
+      }
+
+      return client;
+    }
+
+    if (!secret) {
+      throw createOAuthError('invalid_client', 'Missing client_secret.', 401, {
+        shouldRedirect: false,
+        wwwAuthenticate: 'Basic realm="oauth2"',
+      });
+    }
+
+    if (!await verifyClientSecretAsync(secret, client.clientSecretHash)) {
+      throw createOAuthError('invalid_client', 'Invalid client credentials.', 401, {
+        shouldRedirect: false,
+        wwwAuthenticate: 'Basic realm="oauth2"',
+      });
+    }
+
+    return client;
+  }
+
+  async function resolveClientFromRequestAsync(req, { allowPublicClient = false } = {}) {
+    const basic = parseBasicAuthHeader(req?.headers?.authorization);
+    const bodyClientId = asNonEmptyString(readRequestParam(req, 'client_id'));
+    const bodyClientSecret = asNonEmptyString(readRequestParam(req, 'client_secret'));
+    const clientId = asNonEmptyString(basic?.clientId, bodyClientId);
+    const clientSecret = asNonEmptyString(basic?.clientSecret, bodyClientSecret);
+    return authenticateClientCredentialsAsync({
+      clientId,
+      clientSecret,
+      allowPublicClient,
+    });
+  }
+
   function issueTokens({
     client,
     subject = '',
@@ -1456,12 +1637,7 @@ function createOAuth2Manager({ config, storeAdapter }) {
     });
   }
 
-  function issueClientCredentials({ clientId, clientSecret = '', scope = '' } = {}) {
-    const client = authenticateClientCredentials({
-      clientId,
-      clientSecret,
-      allowPublicClient: false,
-    });
+  function issueClientCredentialsForClient(client, scope = '') {
     assertGrantAllowed(client, 'client_credentials');
     return issueTokens({
       client,
@@ -1470,6 +1646,15 @@ function createOAuth2Manager({ config, storeAdapter }) {
       grantType: 'client_credentials',
       includeRefreshToken: false,
     });
+  }
+
+  function issueClientCredentials({ clientId, clientSecret = '', scope = '' } = {}) {
+    const client = authenticateClientCredentials({
+      clientId,
+      clientSecret,
+      allowPublicClient: false,
+    });
+    return issueClientCredentialsForClient(client, scope);
   }
 
   function introspect(token) {
@@ -1566,17 +1751,11 @@ function createOAuth2Manager({ config, storeAdapter }) {
     return removed;
   }
 
-  function exchangeRefreshToken({
+  function exchangeRefreshTokenForClient({
     refreshToken,
-    clientId,
-    clientSecret = '',
+    client,
     scope = '',
   } = {}) {
-    const client = authenticateClientCredentials({
-      clientId,
-      clientSecret,
-      allowPublicClient: true,
-    });
     assertGrantAllowed(client, 'refresh_token');
 
     const normalizedRefreshToken = asNonEmptyString(refreshToken);
@@ -1614,6 +1793,24 @@ function createOAuth2Manager({ config, storeAdapter }) {
     });
   }
 
+  function exchangeRefreshToken({
+    refreshToken,
+    clientId,
+    clientSecret = '',
+    scope = '',
+  } = {}) {
+    const client = authenticateClientCredentials({
+      clientId,
+      clientSecret,
+      allowPublicClient: true,
+    });
+    return exchangeRefreshTokenForClient({
+      refreshToken,
+      client,
+      scope,
+    });
+  }
+
   function middleware(options = {}) {
     const optional = options.optional === true;
 
@@ -1648,9 +1845,16 @@ function createOAuth2Manager({ config, storeAdapter }) {
 
     const fromReqUser = asNonEmptyString(req?.user?.id, asNonEmptyString(req?.user?.sub));
     const fromReqAuth = asNonEmptyString(req?.auth?.sub);
-    const fromParams = asNonEmptyString(params.subject, asNonEmptyString(params.user_id));
 
-    return fromReqUser || fromReqAuth || fromParams;
+    if (fromReqUser || fromReqAuth) {
+      return fromReqUser || fromReqAuth;
+    }
+
+    if (serverConfig.allowSubjectFromParams === true) {
+      return asNonEmptyString(params.subject, asNonEmptyString(params.user_id));
+    }
+
+    return '';
   }
 
   async function isConsentApproved(req, params, client, subject) {
@@ -1677,8 +1881,7 @@ function createOAuth2Manager({ config, storeAdapter }) {
       return false;
     }
 
-    const origin = resolveRequestOrigin(req);
-    return origin.startsWith('http://');
+    return req?.secure !== true;
   }
 
   function ensureSecureTransport(req) {
@@ -1808,7 +2011,7 @@ function createOAuth2Manager({ config, storeAdapter }) {
 
       let tokens;
       if (grantType === 'authorization_code') {
-        const client = resolveClientFromRequest(req, { allowPublicClient: true });
+        const client = await resolveClientFromRequestAsync(req, { allowPublicClient: true });
         assertGrantAllowed(client, 'authorization_code');
         tokens = exchangeAuthorizationCode({
           code: readRequestParam(req, 'code'),
@@ -1817,22 +2020,16 @@ function createOAuth2Manager({ config, storeAdapter }) {
           codeVerifier: readRequestParam(req, 'code_verifier'),
         });
       } else if (grantType === 'refresh_token') {
-        const client = resolveClientFromRequest(req, { allowPublicClient: true });
+        const client = await resolveClientFromRequestAsync(req, { allowPublicClient: true });
         assertGrantAllowed(client, 'refresh_token');
-        tokens = exchangeRefreshToken({
+        tokens = exchangeRefreshTokenForClient({
           refreshToken: readRequestParam(req, 'refresh_token'),
-          clientId: client.clientId,
-          clientSecret: readRequestParam(req, 'client_secret') || (parseBasicAuthHeader(req?.headers?.authorization)?.clientSecret || ''),
+          client,
           scope: readRequestParam(req, 'scope'),
         });
       } else {
-        const client = resolveClientFromRequest(req, { allowPublicClient: false });
-        assertGrantAllowed(client, 'client_credentials');
-        tokens = issueClientCredentials({
-          clientId: client.clientId,
-          clientSecret: readRequestParam(req, 'client_secret') || (parseBasicAuthHeader(req?.headers?.authorization)?.clientSecret || ''),
-          scope: readRequestParam(req, 'scope'),
-        });
+        const client = await resolveClientFromRequestAsync(req, { allowPublicClient: false });
+        tokens = issueClientCredentialsForClient(client, readRequestParam(req, 'scope'));
       }
 
       res.set('Cache-Control', 'no-store');
@@ -1859,7 +2056,7 @@ function createOAuth2Manager({ config, storeAdapter }) {
   async function introspectionEndpoint(req, res) {
     try {
       ensureSecureTransport(req);
-      resolveClientFromRequest(req, { allowPublicClient: false });
+      await resolveClientFromRequestAsync(req, { allowPublicClient: false });
       const token = asNonEmptyString(readRequestParam(req, 'token'));
       if (!token) {
         throw createOAuthError('invalid_request', 'Missing token.');
@@ -1888,7 +2085,7 @@ function createOAuth2Manager({ config, storeAdapter }) {
   async function revocationEndpoint(req, res) {
     try {
       ensureSecureTransport(req);
-      const client = resolveClientFromRequest(req, { allowPublicClient: false });
+      const client = await resolveClientFromRequestAsync(req, { allowPublicClient: false });
       const token = asNonEmptyString(readRequestParam(req, 'token'));
       if (!token) {
         throw createOAuthError('invalid_request', 'Missing token.');

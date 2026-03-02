@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import { ensureDir, ensureValidName, exists, normalizeMountPath, writeFile } from '../utils/fs.js';
+import { resolveProjectRoot } from '../utils/project.js';
 import {
   renderAppRoutes,
   renderAppViewsFile,
@@ -58,77 +59,6 @@ async function detectSettingsMode(projectRoot) {
   }
 
   throw new Error(`Not an AegisNode project root: missing ${single} (or legacy ${split})`);
-}
-
-async function hasProjectRoutes(projectRoot) {
-  const hasRoutesFile = await exists(path.join(projectRoot, 'routes.js'));
-  const hasLegacyRoutes = await exists(path.join(projectRoot, 'routes', 'index.js'));
-  return hasRoutesFile || hasLegacyRoutes;
-}
-
-async function hasProjectSettings(projectRoot) {
-  try {
-    await detectSettingsMode(projectRoot);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function isProjectRoot(projectRoot) {
-  const [routesOk, settingsOk] = await Promise.all([
-    hasProjectRoutes(projectRoot),
-    hasProjectSettings(projectRoot),
-  ]);
-  return routesOk && settingsOk;
-}
-
-async function resolveProjectRoot(projectRootHint) {
-  const startDir = path.resolve(projectRootHint);
-
-  let cursor = startDir;
-  // 1) Prefer current dir or any parent dir (handles running inside project subfolders).
-  while (true) {
-    if (await isProjectRoot(cursor)) {
-      return cursor;
-    }
-
-    const parent = path.dirname(cursor);
-    if (parent === cursor) {
-      break;
-    }
-    cursor = parent;
-  }
-
-  // 2) If not found upward, detect exactly one project in current dir children.
-  let entries = [];
-  try {
-    entries = await fs.readdir(startDir, { withFileTypes: true });
-  } catch {
-    entries = [];
-  }
-
-  const matches = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-    const candidate = path.join(startDir, entry.name);
-    if (await isProjectRoot(candidate)) {
-      matches.push(candidate);
-    }
-  }
-
-  if (matches.length === 1) {
-    return matches[0];
-  }
-
-  if (matches.length > 1) {
-    const names = matches.map((item) => path.basename(item)).join(', ');
-    throw new Error(`Multiple AegisNode projects found in ${startDir}: ${names}. Use --project <path>.`);
-  }
-
-  throw new Error(`Could not find an AegisNode project from ${startDir}. Run inside the project or use --project <path>.`);
 }
 
 async function readAppsConfig(settingsMode) {

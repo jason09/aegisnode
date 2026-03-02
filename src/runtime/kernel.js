@@ -321,6 +321,7 @@ function normalizeCsrfConfig(rawSecurity) {
     headerName: typeof csrf.headerName === 'string' && csrf.headerName.trim().length > 0
       ? csrf.headerName.trim().toLowerCase()
       : 'x-csrf-token',
+    requireSignedCookie: csrf.requireSignedCookie !== false,
     sameSite: normalizeSameSite(csrf.sameSite),
     secure: secureRaw === true || secureRaw === false ? secureRaw : 'auto',
     httpOnly: csrf.httpOnly !== false,
@@ -1954,6 +1955,10 @@ function attachCsrfProtection(expressApp, config, logger, auth = null) {
   if (!csrfConfig.enabled) {
     logger.info('CSRF protection disabled by configuration.');
     return;
+  }
+
+  if (!appSecret && csrfConfig.requireSignedCookie) {
+    throw new Error('CSRF protection requires a strong security.appSecret (min length 16) to sign CSRF cookies. Set security.appSecret or set security.csrf.requireSignedCookie=false (not recommended).');
   }
 
   if (!appSecret) {
