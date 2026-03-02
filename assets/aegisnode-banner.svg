@@ -1,0 +1,66 @@
+<svg width="1600" height="520" viewBox="0 0 1600 520" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="banner-bg" x1="0" y1="0" x2="1600" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E1737"/>
+      <stop offset="0.5" stop-color="#103C70"/>
+      <stop offset="1" stop-color="#14A49F"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="224" y1="80" x2="496" y2="352" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#D5EAFF" stop-opacity="0.75"/>
+    </linearGradient>
+    <linearGradient id="line" x1="184" y1="315" x2="392" y2="162" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E4E8A"/>
+      <stop offset="1" stop-color="#1AA7A1"/>
+    </linearGradient>
+    <filter id="soft" x="0" y="0" width="1600" height="520" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="0"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="520" rx="40" fill="url(#banner-bg)"/>
+
+  <g opacity="0.22" stroke="#A5D7FF" stroke-width="1.4">
+    <path d="M0 90H1600"/>
+    <path d="M0 150H1600"/>
+    <path d="M0 210H1600"/>
+    <path d="M0 270H1600"/>
+    <path d="M0 330H1600"/>
+    <path d="M0 390H1600"/>
+    <path d="M0 450H1600"/>
+  </g>
+
+  <circle cx="1280" cy="160" r="170" fill="#7EC8FF" fill-opacity="0.12"/>
+  <circle cx="1430" cy="390" r="210" fill="#44E0D0" fill-opacity="0.1"/>
+
+  <g filter="url(#soft)">
+    <path d="M288 78L431 135V257C431 341 370 411 288 460C206 411 145 341 145 257V135L288 78Z" fill="url(#glow)"/>
+    <path d="M288 100L409 149V251C409 324 358 386 288 425C218 386 167 324 167 251V149L288 100Z" fill="#E9F4FF"/>
+
+    <g stroke="url(#line)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M200 349L288 190L376 349"/>
+      <path d="M239 285H337"/>
+      <path d="M201 349H376"/>
+    </g>
+
+    <g fill="#0B2A50">
+      <circle cx="200" cy="349" r="16"/>
+      <circle cx="288" cy="190" r="16"/>
+      <circle cx="376" cy="349" r="16"/>
+    </g>
+  </g>
+
+  <g fill="#EAF5FF">
+    <text x="520" y="226" font-family="Segoe UI, Trebuchet MS, Arial, sans-serif" font-size="118" font-weight="700" letter-spacing="0.6">AegisNode</text>
+    <text x="525" y="296" font-family="Segoe UI, Trebuchet MS, Arial, sans-serif" font-size="38" font-weight="500" fill="#CDE8FF">
+      View-first Node.js framework starter
+    </text>
+  </g>
+
+  <g>
+    <rect x="523" y="333" width="510" height="58" rx="14" fill="#0E2D57" fill-opacity="0.78"/>
+    <text x="552" y="372" font-family="Segoe UI, Trebuchet MS, Arial, sans-serif" font-size="28" font-weight="600" fill="#8FE6DA">
+      CLI | DI | Events | SQL/NoSQL | WebSocket
+    </text>
+  </g>
+</svg>

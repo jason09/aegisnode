@@ -1,0 +1,47 @@
+{
+  "name": "aegisnode",
+  "version": "0.1.0",
+  "description": "A modular Node.js framework with CLI scaffolding, view-first routing, context-injected handlers, DI/events, and SQL/NoSQL support.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./runtime": "./src/runtime/kernel.js"
+  },
+  "bin": {
+    "aegisnode": "./bin/aegisnode.js",
+    "my-node-framework": "./bin/aegisnode.js"
+  },
+  "scripts": {
+    "test": "node ./scripts/smoke-test.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "scripts",
+    "README.md"
+  ],
+  "keywords": [
+    "framework",
+    "nodejs",
+    "cli",
+    "di",
+    "events",
+    "querymesh",
+    "websocket"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.2.1",
+    "helmet": "^8.1.0",
+    "jlive": "^0.1.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.12.1",
+    "querymesh": "^0.0.5",
+    "socket.io": "^4.8.1",
+    "swagger-ui-express": "^5.0.1"
+  }
+}
