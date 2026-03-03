@@ -66,7 +66,7 @@ export function renderProjectSettings(projectName, appSecret, apps) {
   },
 
   // Optional sections you can add manually when needed:
-  // templates, staticDir, websocket, auth, api, swagger,
+  // templates, staticDir, websocket, uploads, auth, api, swagger,
   // architecture, loaders, environments, security.headers/ddos/csrf
 
   apps: [

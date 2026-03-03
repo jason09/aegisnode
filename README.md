@@ -12,6 +12,7 @@ AegisNode is a modular, view-first Node.js framework starter with:
 - Modular app structure
 - SQL/NoSQL bootstrap via QueryMesh/Mongoose
 - WebSocket bootstrap using Socket.IO
+- Built-in file uploads with size/type limits (`route.upload`)
 - Centralized config and loaders
 - Security headers via Helmet (configurable CSP) + CSRF protection for form submissions
 - Built-in rate limiting for basic DDoS resistance
@@ -123,7 +124,7 @@ export default {
 
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
-- Add optional blocks manually only when needed: `templates`, `staticDir`, `websocket`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- Add optional blocks manually only when needed: `templates`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
 <!-- SETTINGS_REFERENCE_START -->
@@ -156,6 +157,7 @@ Merge order used at startup:
 | `database` | `object` / see database table | SQL or MongoDB connection settings. |
 | `cache` | `object` / `{ enabled: true, driver: 'memory' }` | Cache backend settings. |
 | `websocket` | `object` / `{ enabled: true, cors: { origin: false } }` | Socket.IO server options. |
+| `uploads` | `object` / see uploads table | Built-in file upload middleware settings used by `route.upload`. |
 | `api` | `object` / see API table | API-app middleware behavior (JSON enforcement, no-store, CSRF skip for API mounts). |
 | `auth` | `object` / see auth tables | JWT or OAuth2 provider settings. |
 | `swagger` | `object` / see swagger table | OpenAPI JSON + Swagger UI settings. |
@@ -283,13 +285,29 @@ Mongo config shortcuts accepted in `database.config`:
 | `enabled` | `boolean` / `true` | Enable Socket.IO server. |
 | `cors` | `object` / `{ origin: false }` | Passed directly to Socket.IO `cors` option. |
 
+### Uploads (`uploads`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable built-in upload manager. |
+| `dir` | `string` / `'uploads'` | Upload destination folder (absolute or relative to project root). |
+| `createDir` | `boolean` / `true` | Create upload directory automatically on boot. |
+| `preserveExtension` | `boolean` / `true` | Preserve original file extension in generated file name. |
+| `maxFileSize` | `number \| string` / `5 * 1024 * 1024` | Per-file max size in bytes. String units like `'5mb'` are accepted. |
+| `maxFiles` | `number` / `5` | Max file count per request. |
+| `maxFields` | `number` / `50` | Max non-file form fields per request. |
+| `maxFieldSize` | `number \| string` / `1024 * 1024` | Max size per form field value. String units are accepted. |
+| `allowedMimeTypes` | `string[] \| string` / `[]` | Allowed MIME types. Empty means allow all. |
+| `allowedExtensions` | `string[] \| string` / `[]` | Allowed file extensions (`.jpg`, `.pdf`, ...). Empty means allow all. |
+| `allowApiMultipart` | `boolean` / `true` | Allow `multipart/form-data` on API mounts even when `api.requireJsonForUnsafeMethods` is true. |
+
 ### API (`api`)
 
 | Key | Type / Default | Description |
 | --- | --- | --- |
 | `apps` | `string[]` / `[]` | App names treated as API apps. Mounts are resolved from `settings.apps`. |
 | `disableCsrf` | `boolean` / `true` | Skip CSRF checks for API app mounts. |
-| `requireJsonForUnsafeMethods` | `boolean` / `true` | Reject unsafe API payloads unless `Content-Type` is JSON (`415`). |
+| `requireJsonForUnsafeMethods` | `boolean` / `true` | Reject unsafe API payloads unless `Content-Type` is JSON (`415`). Multipart is allowed when `uploads.allowApiMultipart=true`. |
 | `noStoreHeaders` | `boolean` / `true` | Set `Cache-Control: no-store` on API responses. |
 
 ### Auth (`auth`)
@@ -610,6 +628,128 @@ export default {
 };
 ```
 
+## File Uploads
+
+AegisNode provides built-in upload middleware on route API as `route.upload`.
+
+Storage location:
+- Default folder: `<project-root>/uploads`
+- Change with `settings.uploads.dir` (relative or absolute path)
+
+Recommended upload settings:
+
+```js
+uploads: {
+  enabled: true,
+  dir: 'storage/uploads',
+  createDir: true,
+  preserveExtension: true,
+  maxFileSize: '5mb',
+  maxFiles: 5,
+  maxFields: 50,
+  maxFieldSize: '1mb',
+  allowedMimeTypes: ['image/png', 'image/jpeg'],
+  allowedExtensions: ['.png', '.jpg', '.jpeg'],
+  allowApiMultipart: true,
+},
+```
+
+Route middleware modes:
+
+```js
+import UsersView from './views.js';
+
+export default {
+  appName: 'users',
+  register(route) {
+    // One file -> req.file
+    route.post('/avatar', route.upload.single('avatar'), UsersView.uploadAvatar);
+
+    // Many files from one input name -> req.files (array)
+    route.post('/gallery', route.upload.array('photos', 6), UsersView.uploadGallery);
+
+    // Many named file inputs -> req.files.<fieldName> (array)
+    route.post(
+      '/documents',
+      route.upload.fields([
+        { name: 'avatar', maxCount: 1 },
+        { name: 'docs', maxCount: 3 },
+      ]),
+      UsersView.uploadDocuments,
+    );
+
+    // Accept all file fields -> req.files (array)
+    route.post('/any-upload', route.upload.any(), UsersView.uploadAny);
+
+    // No files, parse multipart text fields only
+    route.post('/multipart-no-file', route.upload.none(), UsersView.multipartNoFile);
+  },
+};
+```
+
+`req` payload shape:
+- `single()`: `req.file` + `req.body`
+- `array()`: `req.files` (array) + `req.body`
+- `fields()`: `req.files` object (`req.files.avatar`, `req.files.docs`, ...) + `req.body`
+
+Custom route with form fields + file:
+
+```js
+// apps/users/routes.js
+import UsersView from './views.js';
+
+export default {
+  appName: 'users',
+  register(route) {
+    route.post('/profile/update', route.upload.single('avatar'), UsersView.updateProfile);
+  },
+};
+```
+
+```js
+// apps/users/views.js
+class UsersView {
+  static updateProfile(_context, req, res) {
+    const { username, bio } = req.body;
+    const avatar = req.file || null;
+
+    return res.json({
+      username,
+      bio,
+      avatar: avatar ? {
+        name: avatar.filename,
+        originalName: avatar.originalname,
+        mimeType: avatar.mimetype,
+        size: avatar.size,
+        path: avatar.path,
+      } : null,
+    });
+  }
+}
+
+export default UsersView;
+```
+
+```html
+<form action="/users/profile/update" method="POST" enctype="multipart/form-data">
+  <%= csrfToken %>
+  <input name="username" />
+  <textarea name="bio"></textarea>
+  <input type="file" name="avatar" />
+  <button type="submit">Save</button>
+</form>
+```
+
+Upload limits and rejections:
+- Per-file size limit from `uploads.maxFileSize` returns `413` when exceeded.
+- Total files limit from `uploads.maxFiles` returns `413` when exceeded.
+- `allowedMimeTypes` / `allowedExtensions` mismatch returns `415`.
+
+Important behavior:
+- If `uploads.enabled=false`, using `route.upload.*` throws at route registration.
+- For API mounts, multipart is allowed only when `uploads.allowApiMultipart=true`.
+- For non-API form submissions, CSRF token is required by default.
+
 ## API Apps In Settings
 
 After `createapp`, declare which apps are API apps in `settings.js`:
@@ -626,6 +766,7 @@ api: {
 What this enables:
 - API middleware is applied to configured app mounts.
 - Unsafe methods (`POST/PUT/PATCH/DELETE`) with body must be `application/json` (`415` otherwise).
+- `multipart/form-data` uploads are allowed on API mounts when `uploads.allowApiMultipart: true` (default).
 - CSRF checks are skipped only for these API app mounts when `disableCsrf: true`.
 - `Cache-Control: no-store` is added on API responses.
 
@@ -1513,3 +1654,7 @@ WebSocket security note:
 - Set explicit allowed origins in `settings.js` when needed.
 
 Note: framework rate limiting helps with basic abuse, but real DDoS protection should be done at edge (Cloudflare/AWS WAF/Nginx).
+
+## License
+
+MIT

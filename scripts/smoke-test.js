@@ -972,6 +972,83 @@ async function main() {
   assert.equal(securedAllowedJson.ok, true);
   await kernelWithMiddleware.stop();
 
+  await fs.writeFile(
+    path.join(projectRoot, 'routes.js'),
+    `export default {\n  register(route) {\n    route.post('/upload', route.upload.single('avatar'), (req, res) => {\n      if (!req.file) {\n        res.status(400).json({ error: 'No file uploaded' });\n        return;\n      }\n\n      res.json({\n        file: {\n          name: req.file.filename,\n          mimeType: req.file.mimetype,\n          size: req.file.size,\n        },\n      });\n    });\n  },\n};\n`,
+    'utf8',
+  );
+
+  const kernelWithUploads = await createKernel({
+    rootDir: projectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+      security: {
+        csrf: {
+          enabled: false,
+        },
+      },
+      uploads: {
+        enabled: true,
+        dir: 'storage/uploads-test',
+        maxFileSize: 64,
+        allowedMimeTypes: ['text/plain'],
+        allowedExtensions: ['.txt'],
+      },
+    },
+  });
+
+  await kernelWithUploads.start();
+  const uploadAddress = kernelWithUploads.context.server.address();
+  const uploadPort = typeof uploadAddress === 'object' && uploadAddress ? uploadAddress.port : 0;
+
+  const uploadForm = new FormData();
+  uploadForm.append('avatar', new Blob(['hello-upload'], { type: 'text/plain' }), 'avatar.txt');
+  const uploadOk = await fetch(`http://127.0.0.1:${uploadPort}/upload`, {
+    method: 'POST',
+    body: uploadForm,
+  });
+  assert.equal(uploadOk.status, 200);
+  const uploadOkJson = await uploadOk.json();
+  assert.equal(uploadOkJson.file.mimeType, 'text/plain');
+  assert.equal(typeof uploadOkJson.file.name, 'string');
+
+  const uploadMimeForm = new FormData();
+  uploadMimeForm.append('avatar', new Blob(['png-content'], { type: 'image/png' }), 'avatar.png');
+  const uploadMimeRejected = await fetch(`http://127.0.0.1:${uploadPort}/upload`, {
+    method: 'POST',
+    body: uploadMimeForm,
+  });
+  assert.equal(uploadMimeRejected.status, 415);
+
+  const uploadSizeForm = new FormData();
+  uploadSizeForm.append('avatar', new Blob(['x'.repeat(256)], { type: 'text/plain' }), 'big.txt');
+  const uploadTooLarge = await fetch(`http://127.0.0.1:${uploadPort}/upload`, {
+    method: 'POST',
+    body: uploadSizeForm,
+  });
+  assert.equal(uploadTooLarge.status, 413);
+  await kernelWithUploads.stop();
+
+  await assert.rejects(
+    () => createKernel({
+      rootDir: projectRoot,
+      overrides: {
+        host: '127.0.0.1',
+        port: 0,
+        security: {
+          csrf: {
+            enabled: false,
+          },
+        },
+        uploads: {
+          enabled: false,
+        },
+      },
+    }),
+    /Uploads are disabled/,
+  );
+
   const settingsFile = path.join(projectRoot, 'settings.js');
   const settingsBeforeStrict = await fs.readFile(settingsFile, 'utf8');
   const settingsWithStrictLayers = settingsBeforeStrict.replace(

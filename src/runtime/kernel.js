@@ -19,6 +19,7 @@ import { createAuthManager, normalizeAuthConfig } from './auth.js';
 import { initializeDatabase, closeDatabase } from './database.js';
 import { runLoaders } from './loaders.js';
 import { createRuntimeHelpers } from './helpers.js';
+import { createUploadManager, isMultipartRequestContentType, normalizeUploadsConfig } from './upload.js';
 
 const ROUTE_DEFINITION = 'aegis:routes';
 const PROJECT_ROUTE_DEFINITION = 'aegis:project-routes';
@@ -773,6 +774,7 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
     auth: context.auth,
     helpers: context.helpers,
     jlive: context.jlive,
+    upload: context.upload,
     app: appDefinition || null,
     appName,
     services: appName ? layerAccessors.servicesForApp(appName) : layerAccessors.services,
@@ -800,6 +802,7 @@ function bridgeRuntimeContextToRequest(req, runtimeContext = null, appName = nul
     auth: runtimeContext.auth,
     helpers: runtimeContext.helpers,
     jlive: runtimeContext.jlive,
+    upload: runtimeContext.upload,
     services: runtimeContext.services,
     models: runtimeContext.models,
     validators: runtimeContext.validators,
@@ -867,6 +870,7 @@ function buildHandlerContext(req, runtimeContext = null, currentApp = null) {
     auth: aegis.auth ?? runtimeContext?.auth ?? null,
     helpers: aegis.helpers ?? runtimeContext?.helpers ?? null,
     jlive: aegis.jlive ?? runtimeContext?.jlive ?? null,
+    upload: aegis.upload ?? runtimeContext?.upload ?? null,
     services,
     models,
     validators,
@@ -1039,6 +1043,7 @@ function buildControllerDependencies({ appName, runtimeContext = null, container
     auth: runtimeContext?.auth,
     helpers: runtimeContext?.helpers,
     jlive: runtimeContext?.jlive,
+    upload: runtimeContext?.upload,
     services: getScopedLayerAccessor(runtimeContext?.services, appName),
     models: getScopedLayerAccessor(runtimeContext?.models, appName),
     validators: getScopedLayerAccessor(runtimeContext?.validators, appName),
@@ -1210,10 +1215,25 @@ function buildHandler(candidate, resolveRef, currentApp, runtimeContext = null) 
   throw new Error('Route handler must be a function, a controller reference string, or a route module with register().');
 }
 
+function createDisabledUploadApi() {
+  const disabled = () => {
+    throw new Error('Uploads are disabled. Enable settings.uploads.enabled=true to use route.upload middleware.');
+  };
+
+  return {
+    single: disabled,
+    array: disabled,
+    fields: disabled,
+    any: disabled,
+    none: disabled,
+  };
+}
+
 function createRouteApi(router, resolveRef, currentApp, options = {}) {
   const routeState = options?.routeState || null;
   const runtimeContext = options?.runtimeContext || null;
   const api = {};
+  api.upload = runtimeContext?.upload || createDisabledUploadApi();
 
   const verbs = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'all'];
   for (const verb of verbs) {
@@ -1264,6 +1284,7 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
   const helperSet = isPlainObject(runtimeContext?.helpers) ? runtimeContext.helpers : {};
   const jliveBridge = runtimeContext?.jlive || null;
   const authManager = runtimeContext?.auth || null;
+  const uploadManager = runtimeContext?.upload || null;
   const services = runtimeContext?.services || null;
   const models = runtimeContext?.models || null;
   const validators = runtimeContext?.validators || null;
@@ -1285,6 +1306,9 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
     }
     if (!Object.prototype.hasOwnProperty.call(req.aegis, 'auth')) {
       req.aegis.auth = authManager;
+    }
+    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'upload')) {
+      req.aegis.upload = uploadManager;
     }
     if (!Object.prototype.hasOwnProperty.call(req.aegis, 'services')) {
       req.aegis.services = services;
@@ -1835,6 +1859,7 @@ function buildContext({
   auth = null,
   helpers = {},
   jlive = null,
+  upload = null,
 }) {
   return {
     rootDir,
@@ -1852,6 +1877,7 @@ function buildContext({
     auth,
     helpers,
     jlive,
+    upload,
   };
 }
 
@@ -2030,6 +2056,8 @@ function attachCsrfProtection(expressApp, config, logger, auth = null) {
 function attachApiMiddlewares(expressApp, config, declaredApps, logger) {
   const apiConfig = normalizeApiConfig(config.api, declaredApps || config.apps || []);
   config.api = apiConfig;
+  const uploadsConfig = config.uploads && typeof config.uploads === 'object' ? config.uploads : null;
+  const allowApiMultipart = uploadsConfig?.enabled !== false && uploadsConfig?.allowApiMultipart === true;
 
   if (!Array.isArray(apiConfig.mounts) || apiConfig.mounts.length === 0) {
     logger.debug('API app middleware disabled: no API apps configured.');
@@ -2055,6 +2083,7 @@ function attachApiMiddlewares(expressApp, config, declaredApps, logger) {
       apiConfig.requireJsonForUnsafeMethods
       && !isSafeHttpMethod(req.method)
       && hasRequestBody(req)
+      && !(allowApiMultipart && isMultipartRequestContentType(req.headers?.['content-type']))
       && !isJsonRequestContentType(req.headers?.['content-type'])
     ) {
       return res.status(415).json({
@@ -2221,10 +2250,12 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   });
   config.swagger = normalizeSwaggerConfig(config.swagger);
   config.architecture = normalizeArchitectureConfig(config.architecture);
+  config.uploads = normalizeUploadsConfig(config.uploads, rootDir);
 
   const logger = createLogger({ level: config.logging?.level, name: config.appName || 'aegisnode' });
   const defaultInstallTemplate = await loadDefaultInstallTemplate(logger);
   const runtimeHelpers = await createRuntimeHelpers({ logger });
+  const upload = await createUploadManager(config.uploads, logger);
   const container = createContainer();
   const events = createEventBus();
   const expressApp = express();
@@ -2265,6 +2296,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   container.set('templates', templateConfig);
   container.set('helpers', runtimeHelpers.helpers);
   container.set('jlive', runtimeHelpers.jlive);
+  container.set('upload', upload);
 
   const context = buildContext({
     rootDir,
@@ -2281,6 +2313,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
     auth,
     helpers: runtimeHelpers.helpers,
     jlive: runtimeHelpers.jlive,
+    upload,
   });
   const layerAccessors = createLayerAccessors({ container, context });
   context.services = layerAccessors.services;
