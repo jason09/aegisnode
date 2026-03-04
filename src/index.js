@@ -11,6 +11,8 @@ export {
   timeElapsed,
   timeDifference,
   breakStr,
+  isObjectId,
+  toObjectId,
   createHelpers,
   loadJlive,
   createRuntimeHelpers,

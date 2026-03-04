@@ -10,7 +10,9 @@ import { createKernel } from '../src/runtime/kernel.js';
 import { runServer } from '../src/cli/commands/runserver.js';
 import { createAuthManager, normalizeAuthConfig } from '../src/runtime/auth.js';
 import { loadProjectConfig } from '../src/runtime/config.js';
+import { initializeDatabase, closeDatabase } from '../src/runtime/database.js';
 import { runDoctor } from '../src/cli/commands/doctor.js';
+import { createHelpers } from '../src/runtime/helpers.js';
 
 function createSilentLogger() {
   return {
@@ -138,6 +140,42 @@ async function main() {
   assert.equal(envConfig.logging.level, 'warn');
   assert.equal(envConfig.security.ddos.windowMs, 45000);
   assert.equal(envConfig.security.ddos.maxRequests, 80);
+
+  const helpers = createHelpers();
+  const validObjectId = '507f1f77bcf86cd799439011';
+  const invalidObjectId = 'not-an-object-id';
+
+  assert.equal(helpers.isObjectId(validObjectId), true);
+  assert.equal(helpers.isObjectId(invalidObjectId), false);
+  const convertedObjectId = helpers.toObjectId(validObjectId);
+  assert.ok(convertedObjectId);
+  assert.equal(convertedObjectId.toString(), validObjectId);
+  assert.equal(helpers.toObjectId(invalidObjectId), null);
+
+  const fakeMongoConnection = {
+    db: {
+      collection() {
+        return {};
+      },
+    },
+  };
+
+  const noSqlDb = await initializeDatabase({
+    enabled: true,
+    dialect: 'mongoose',
+    config: {
+      connection: fakeMongoConnection,
+    },
+  }, createSilentLogger());
+
+  assert.equal(noSqlDb.type, 'nosql');
+  assert.equal(noSqlDb.dialect, 'mongodb');
+  assert.equal(typeof noSqlDb.client.table, 'function');
+
+  const compiledMongoQuery = noSqlDb.client.table('users').select(['id', 'name']).compile();
+  assert.equal(typeof compiledMongoQuery, 'object');
+
+  await closeDatabase(noSqlDb);
 
   await fs.mkdir(path.join(projectRoot, 'node_modules'), { recursive: true });
   await fs.symlink(frameworkRoot, path.join(projectRoot, 'node_modules', 'aegisnode'), 'dir');
@@ -1111,9 +1149,31 @@ async function main() {
   const currentSettings = await fs.readFile(settingsFile, 'utf8');
   const updatedSettings = currentSettings.replace(
     /\n\s*apps:\s*\[/,
-    "\n  templates: {\n    dir: 'ui',\n  },\n  apps: [",
+    "\n  templates: {\n    dir: 'ui',\n  },\n  i18n: {\n    enabled: true,\n    defaultLocale: 'en',\n    fallbackLocale: 'en',\n    supported: ['en', 'fr'],\n    translations: {\n      en: 'locales/en.json',\n      fr: 'locales/fr.json',\n    },\n  },\n  apps: [",
   );
   await fs.writeFile(settingsFile, updatedSettings, 'utf8');
+
+  await fs.mkdir(path.join(projectRoot, 'locales'), { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, 'locales', 'en.json'),
+    JSON.stringify({
+      home: {
+        pageTitle: 'Template Test',
+        title: 'Welcome {name}',
+      },
+    }, null, 2),
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'locales', 'fr.json'),
+    JSON.stringify({
+      home: {
+        pageTitle: 'Test de template',
+        title: 'Bienvenue {name}',
+      },
+    }, null, 2),
+    'utf8',
+  );
 
   await fs.mkdir(path.join(projectRoot, 'ui'), { recursive: true });
   await fs.writeFile(
@@ -1123,12 +1183,12 @@ async function main() {
   );
   await fs.writeFile(
     path.join(projectRoot, 'ui', 'home.ejs'),
-    '<h1><%= message %></h1>\n',
+    '<h1><%= t("home.title", { name: "Aegis" }) %></h1>\n<p><%= locale %></p>\n',
     'utf8',
   );
   await fs.writeFile(
     path.join(projectRoot, 'routes.js'),
-    `export default {\n  register(route) {\n    route.get('/', (req, res) => {\n      return res.render('home', {\n        title: 'Template Test',\n        message: 'template-home',\n      });\n    });\n  },\n};\n`,
+    `export default {\n  register(route) {\n    route.get('/i18n/json', (req, res) => {\n      res.json({\n        locale: req.aegis.locale,\n        hello: req.aegis.t('home.title', { name: 'Aegis' }),\n      });\n    });\n\n    route.get('/', (req, res) => {\n      return res.render('home', {\n        title: req.aegis.t('home.pageTitle'),\n      });\n    });\n  },\n};\n`,
     'utf8',
   );
 
@@ -1143,10 +1203,21 @@ async function main() {
   await kernelWithTemplates.start();
   const templateAddress = kernelWithTemplates.context.server.address();
   const templatePort = typeof templateAddress === 'object' && templateAddress ? templateAddress.port : 0;
-  const templateResponse = await fetch(`http://127.0.0.1:${templatePort}/`);
+  const templateResponse = await fetch(`http://127.0.0.1:${templatePort}/`, {
+    headers: {
+      'accept-language': 'fr-FR,fr;q=0.9,en;q=0.8',
+    },
+  });
   const templateHtml = await templateResponse.text();
-  assert.match(templateHtml, /<title>Template Test<\/title>/);
-  assert.match(templateHtml, /template-home/);
+  assert.match(templateHtml, /<title>Test de template<\/title>/);
+  assert.match(templateHtml, /Bienvenue Aegis/);
+  assert.match(templateHtml, /<p>fr<\/p>/);
+
+  const i18nJsonResponse = await fetch(`http://127.0.0.1:${templatePort}/i18n/json?lang=fr`);
+  assert.equal(i18nJsonResponse.status, 200);
+  const i18nJson = await i18nJsonResponse.json();
+  assert.equal(i18nJson.locale, 'fr');
+  assert.equal(i18nJson.hello, 'Bienvenue Aegis');
   await kernelWithTemplates.stop();
 
   const kernelFromParent = await runServer({
@@ -1158,7 +1229,7 @@ async function main() {
   const parentPort = typeof parentAddress === 'object' && parentAddress ? parentAddress.port : 0;
   const parentRootResponse = await fetch(`http://127.0.0.1:${parentPort}/`);
   const parentRootText = await parentRootResponse.text();
-  assert.match(parentRootText, /template-home/);
+  assert.match(parentRootText, /Welcome Aegis/);
   await kernelFromParent.stop();
 
   assert.ok(true, 'Smoke test completed');

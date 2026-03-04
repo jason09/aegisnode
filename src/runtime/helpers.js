@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 
 function isPlainObject(value) {
   return Boolean(value) && Object.prototype.toString.call(value) === '[object Object]';
@@ -82,6 +83,61 @@ function formatDateDmy(unixSeconds) {
   }
 
   return `${pad2(date.getDate())}-${pad2(date.getMonth() + 1)}-${date.getFullYear()}`;
+}
+
+function getMongooseObjectIdCtor() {
+  return mongoose?.Types?.ObjectId || null;
+}
+
+function normalizeObjectIdString(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+export function isObjectId(value) {
+  const ObjectIdCtor = getMongooseObjectIdCtor();
+  if (!ObjectIdCtor) {
+    return false;
+  }
+
+  if (value instanceof ObjectIdCtor) {
+    return true;
+  }
+
+  const candidate = normalizeObjectIdString(value);
+  if (candidate.length === 0) {
+    return false;
+  }
+
+  if (typeof mongoose?.isValidObjectId === 'function') {
+    return mongoose.isValidObjectId(candidate);
+  }
+
+  return /^[a-fA-F0-9]{24}$/.test(candidate);
+}
+
+export function toObjectId(value) {
+  const ObjectIdCtor = getMongooseObjectIdCtor();
+  if (!ObjectIdCtor) {
+    return null;
+  }
+
+  if (value instanceof ObjectIdCtor) {
+    return value;
+  }
+
+  const candidate = normalizeObjectIdString(value);
+  if (!isObjectId(candidate)) {
+    return null;
+  }
+
+  try {
+    return new ObjectIdCtor(candidate);
+  } catch {
+    return null;
+  }
 }
 
 export function money(value, options = {}) {
@@ -323,6 +379,8 @@ export function createHelpers() {
     timeElapsed,
     timeDifference,
     breakStr,
+    isObjectId,
+    toObjectId,
   };
 }
 

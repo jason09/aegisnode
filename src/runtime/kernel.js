@@ -183,6 +183,7 @@ function normalizeTemplatesConfig(rawTemplates, rootDir) {
       dir: 'templates',
       root: path.join(rootDir, 'templates'),
       base: null,
+      appBases: {},
       locals: {},
     };
   }
@@ -204,6 +205,24 @@ function normalizeTemplatesConfig(rawTemplates, rootDir) {
     : (typeof source.base === 'string' && source.base.trim().length > 0
         ? normalizeTemplateName(source.base, 'base template')
         : 'base');
+  const appBasesSource = isPlainObject(source.appBases) ? source.appBases : {};
+  const appBases = {};
+  for (const [appName, layoutName] of Object.entries(appBasesSource)) {
+    if (typeof appName !== 'string' || appName.trim().length === 0) {
+      continue;
+    }
+
+    const normalizedAppName = appName.trim();
+    if (layoutName === false || layoutName === null) {
+      appBases[normalizedAppName] = null;
+      continue;
+    }
+
+    if (typeof layoutName === 'string' && layoutName.trim().length > 0) {
+      appBases[normalizedAppName] = normalizeTemplateName(layoutName, 'app base template for ' + normalizedAppName);
+    }
+  }
+
   const locals = typeof source.locals === 'function'
     ? source.locals
     : (isPlainObject(source.locals) ? source.locals : {});
@@ -214,6 +233,7 @@ function normalizeTemplatesConfig(rawTemplates, rootDir) {
     dir,
     root,
     base,
+    appBases,
     locals,
   };
 }
@@ -911,6 +931,410 @@ function parseCookies(headerValue) {
   return parsed;
 }
 
+function normalizeLocaleToken(locale, fallback = '') {
+  if (typeof locale !== 'string' || locale.trim().length === 0) {
+    return fallback;
+  }
+
+  return locale.trim().replace(/_/g, '-').toLowerCase();
+}
+
+function uniqueStringList(values) {
+  const seen = new Set();
+  const result = [];
+
+  for (const value of Array.isArray(values) ? values : []) {
+    if (typeof value !== 'string' || value.length === 0) {
+      continue;
+    }
+
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    result.push(value);
+  }
+
+  return result;
+}
+
+function loadI18nJsonFile(filePath, logger, label = 'i18n translation file') {
+  if (typeof filePath !== 'string' || filePath.trim().length === 0) {
+    return null;
+  }
+
+  const resolvedPath = path.resolve(filePath.trim());
+
+  try {
+    const content = fs.readFileSync(resolvedPath, 'utf8');
+    const parsed = JSON.parse(content);
+
+    if (!isPlainObject(parsed)) {
+      if (logger && typeof logger.warn === 'function') {
+        logger.warn('%s must contain a JSON object: %s', label, resolvedPath);
+      }
+      return null;
+    }
+
+    return parsed;
+  } catch (error) {
+    if (logger && typeof logger.warn === 'function') {
+      logger.warn('%s could not be loaded (%s): %s', label, resolvedPath, error?.message || String(error));
+    }
+    return null;
+  }
+}
+
+function resolveI18nLocaleMessages(value, { rootDir, locale, logger }) {
+  if (isPlainObject(value)) {
+    return value;
+  }
+
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return null;
+  }
+
+  const rawPath = value.trim();
+  const filePath = path.isAbsolute(rawPath)
+    ? rawPath
+    : path.join(rootDir || process.cwd(), rawPath);
+
+  return loadI18nJsonFile(filePath, logger, 'i18n.translations.' + locale);
+}
+
+function normalizeI18nConfig(rawI18n, rootDir = process.cwd(), logger = null) {
+  const source = isPlainObject(rawI18n) ? rawI18n : {};
+  const directTranslationsSource = isPlainObject(source.translations)
+    ? source.translations
+    : (isPlainObject(source.locales)
+        ? source.locales
+        : (isPlainObject(source.messages) ? source.messages : {}));
+
+  let fileTranslationsSource = {};
+  if (typeof source.translationsFile === 'string' && source.translationsFile.trim().length > 0) {
+    const rawPath = source.translationsFile.trim();
+    const filePath = path.isAbsolute(rawPath)
+      ? rawPath
+      : path.join(rootDir || process.cwd(), rawPath);
+
+    const loaded = loadI18nJsonFile(filePath, logger, 'i18n.translationsFile');
+    if (isPlainObject(loaded)) {
+      fileTranslationsSource = loaded;
+    }
+  }
+
+  const translationsSource = {
+    ...fileTranslationsSource,
+    ...directTranslationsSource,
+  };
+
+  const translations = {};
+  for (const [locale, value] of Object.entries(translationsSource)) {
+    const normalizedLocale = normalizeLocaleToken(locale);
+    if (!normalizedLocale) {
+      continue;
+    }
+
+    const messages = resolveI18nLocaleMessages(value, {
+      rootDir,
+      locale: normalizedLocale,
+      logger,
+    });
+
+    if (!isPlainObject(messages)) {
+      continue;
+    }
+
+    translations[normalizedLocale] = messages;
+  }
+
+  const translationLocales = Object.keys(translations);
+  const configuredSupported = Array.isArray(source.supported)
+    ? source.supported
+      .map((entry) => normalizeLocaleToken(entry))
+      .filter(Boolean)
+    : [];
+
+  const defaultLocale = normalizeLocaleToken(source.defaultLocale, 'en');
+  const fallbackLocale = normalizeLocaleToken(source.fallbackLocale, defaultLocale);
+
+  const supported = uniqueStringList([
+    ...configuredSupported,
+    ...translationLocales,
+    defaultLocale,
+    fallbackLocale,
+  ]);
+
+  if (supported.length === 0) {
+    supported.push(defaultLocale || 'en');
+  }
+
+  return {
+    enabled: source.enabled === true || translationLocales.length > 0,
+    defaultLocale: defaultLocale || 'en',
+    fallbackLocale: fallbackLocale || defaultLocale || 'en',
+    supported,
+    queryParam: typeof source.queryParam === 'string' && source.queryParam.trim().length > 0
+      ? source.queryParam.trim()
+      : 'lang',
+    cookieName: typeof source.cookieName === 'string' && source.cookieName.trim().length > 0
+      ? source.cookieName.trim()
+      : 'aegis_locale',
+    detectFromHeader: source.detectFromHeader !== false,
+    detectFromCookie: source.detectFromCookie !== false,
+    detectFromQuery: source.detectFromQuery !== false,
+    translations,
+  };
+}
+
+function parseAcceptLanguage(headerValue) {
+  if (typeof headerValue !== 'string' || headerValue.trim().length === 0) {
+    return [];
+  }
+
+  const weighted = [];
+  for (const entry of headerValue.split(',')) {
+    const [rawTag, ...params] = entry.trim().split(';');
+    const tag = normalizeLocaleToken(rawTag);
+    if (!tag) {
+      continue;
+    }
+
+    let quality = 1;
+    for (const param of params) {
+      const [rawKey, rawValue] = String(param || '').split('=');
+      if (String(rawKey || '').trim().toLowerCase() !== 'q') {
+        continue;
+      }
+
+      const parsed = Number.parseFloat(String(rawValue || '').trim());
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+        quality = parsed;
+      }
+    }
+
+    weighted.push({ tag, quality });
+  }
+
+  weighted.sort((left, right) => right.quality - left.quality);
+  return weighted.map((entry) => entry.tag);
+}
+
+function resolveSupportedLocale(candidate, supportedLocales, fallbackLocale = 'en') {
+  const supported = Array.isArray(supportedLocales)
+    ? supportedLocales
+      .map((entry) => normalizeLocaleToken(entry))
+      .filter(Boolean)
+    : [];
+
+  if (supported.length === 0) {
+    return normalizeLocaleToken(fallbackLocale, 'en');
+  }
+
+  const normalizedCandidate = normalizeLocaleToken(candidate);
+  if (!normalizedCandidate) {
+    return resolveSupportedLocale(fallbackLocale, supported, supported[0]);
+  }
+
+  if (normalizedCandidate === '*') {
+    return resolveSupportedLocale(fallbackLocale, supported, supported[0]);
+  }
+
+  if (supported.includes(normalizedCandidate)) {
+    return normalizedCandidate;
+  }
+
+  const primary = normalizedCandidate.split('-')[0];
+  const primaryMatch = supported.find((locale) => locale === primary || locale.startsWith(`${primary}-`));
+  if (primaryMatch) {
+    return primaryMatch;
+  }
+
+  const fallback = normalizeLocaleToken(fallbackLocale);
+  if (fallback && supported.includes(fallback)) {
+    return fallback;
+  }
+
+  const fallbackPrimary = fallback ? fallback.split('-')[0] : '';
+  if (fallbackPrimary) {
+    const fallbackPrimaryMatch = supported.find((locale) => locale === fallbackPrimary || locale.startsWith(`${fallbackPrimary}-`));
+    if (fallbackPrimaryMatch) {
+      return fallbackPrimaryMatch;
+    }
+  }
+
+  return supported[0];
+}
+
+function resolveRequestLocale(req, i18nConfig) {
+  const fallbackLocale = i18nConfig.defaultLocale || 'en';
+  const supported = i18nConfig.supported || [];
+
+  const useCandidate = (candidate, source) => {
+    if (typeof candidate !== 'string' || candidate.trim().length === 0) {
+      return null;
+    }
+
+    const resolved = resolveSupportedLocale(candidate, supported, fallbackLocale);
+    if (resolved) {
+      return { locale: resolved, source };
+    }
+    return null;
+  };
+
+  if (i18nConfig.detectFromQuery && i18nConfig.queryParam && req?.query && typeof req.query === 'object') {
+    const queryValue = req.query[i18nConfig.queryParam];
+    const candidate = typeof queryValue === 'string'
+      ? queryValue
+      : (Array.isArray(queryValue) && typeof queryValue[0] === 'string' ? queryValue[0] : '');
+
+    const resolved = useCandidate(candidate, 'query');
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  if (i18nConfig.detectFromCookie && i18nConfig.cookieName) {
+    const cookies = parseCookies(req?.headers?.cookie || '');
+    const resolved = useCandidate(cookies[i18nConfig.cookieName], 'cookie');
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  if (i18nConfig.detectFromHeader) {
+    const accepted = parseAcceptLanguage(req?.headers?.['accept-language'] || '');
+    for (const candidate of accepted) {
+      const resolved = useCandidate(candidate, 'header');
+      if (resolved) {
+        return resolved;
+      }
+    }
+  }
+
+  return {
+    locale: resolveSupportedLocale(fallbackLocale, supported, fallbackLocale),
+    source: 'default',
+  };
+}
+
+function readTranslationValue(translations, key) {
+  if (!isPlainObject(translations) || typeof key !== 'string' || key.trim().length === 0) {
+    return undefined;
+  }
+
+  const normalizedKey = key.trim();
+  if (Object.prototype.hasOwnProperty.call(translations, normalizedKey)) {
+    return translations[normalizedKey];
+  }
+
+  const parts = normalizedKey.split('.').filter(Boolean);
+  if (parts.length === 0) {
+    return undefined;
+  }
+
+  let current = translations;
+  for (const part of parts) {
+    if (!isPlainObject(current) || !Object.prototype.hasOwnProperty.call(current, part)) {
+      return undefined;
+    }
+    current = current[part];
+  }
+
+  return current;
+}
+
+function formatTranslationValue(value, variables = {}) {
+  if (typeof value === 'string') {
+    const safeVariables = isPlainObject(variables) ? variables : {};
+    return value.replace(/\{([a-zA-Z0-9_.-]+)\}/g, (match, token) => {
+      if (Object.prototype.hasOwnProperty.call(safeVariables, token)) {
+        return String(safeVariables[token]);
+      }
+      return match;
+    });
+  }
+
+  if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') {
+    return String(value);
+  }
+
+  return null;
+}
+
+function resolveTranslationValue(i18nConfig, locale, key) {
+  const normalizedLocale = normalizeLocaleToken(locale);
+  if (!normalizedLocale || !isPlainObject(i18nConfig.translations)) {
+    return undefined;
+  }
+
+  const direct = readTranslationValue(i18nConfig.translations[normalizedLocale], key);
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  const primary = normalizedLocale.split('-')[0];
+  if (!primary) {
+    return undefined;
+  }
+
+  for (const [candidateLocale, messages] of Object.entries(i18nConfig.translations)) {
+    const normalizedCandidate = normalizeLocaleToken(candidateLocale);
+    if (normalizedCandidate === primary || normalizedCandidate.startsWith(`${primary}-`)) {
+      const resolved = readTranslationValue(messages, key);
+      if (resolved !== undefined) {
+        return resolved;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function createTranslator(i18nConfig, resolveActiveLocale) {
+  return (key, variables = {}, options = {}) => {
+    if (typeof key !== 'string' || key.trim().length === 0) {
+      return '';
+    }
+
+    const normalizedKey = key.trim();
+    const safeOptions = isPlainObject(options) ? options : {};
+    const requestedLocale = resolveSupportedLocale(
+      safeOptions.locale || resolveActiveLocale(),
+      i18nConfig.supported,
+      i18nConfig.defaultLocale,
+    );
+
+    const localesToTry = uniqueStringList([
+      requestedLocale,
+      i18nConfig.fallbackLocale,
+      i18nConfig.defaultLocale,
+    ]);
+
+    for (const locale of localesToTry) {
+      const value = resolveTranslationValue(i18nConfig, locale, normalizedKey);
+      if (value === undefined) {
+        continue;
+      }
+
+      const rendered = formatTranslationValue(value, variables);
+      if (rendered !== null) {
+        return rendered;
+      }
+
+      return normalizedKey;
+    }
+
+    if (typeof safeOptions.defaultValue === 'string') {
+      return safeOptions.defaultValue;
+    }
+
+    return normalizedKey;
+  };
+}
+
+
 function isSafeHttpMethod(method) {
   const upper = String(method || '').toUpperCase();
   return upper === 'GET' || upper === 'HEAD' || upper === 'OPTIONS';
@@ -1295,6 +1719,15 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
   const io = runtimeContext?.io || null;
   const database = runtimeContext?.database || null;
   const dbClient = runtimeContext?.dbClient ?? runtimeContext?.database?.client ?? null;
+  const i18nConfig = normalizeI18nConfig(
+    config?.i18n,
+    runtimeContext?.rootDir || config?.rootDir || process.cwd(),
+    logger,
+  );
+
+  if (config && isPlainObject(config)) {
+    config.i18n = i18nConfig;
+  }
 
   expressApp.use((req, res, next) => {
     req.aegis = req.aegis || {};
@@ -1340,6 +1773,78 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
     if (!Object.prototype.hasOwnProperty.call(req.aegis, 'dbClient')) {
       req.aegis.dbClient = dbClient;
     }
+
+    const localeResolution = i18nConfig.enabled
+      ? resolveRequestLocale(req, i18nConfig)
+      : {
+          locale: i18nConfig.defaultLocale,
+          source: 'disabled',
+        };
+
+    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'locale')) {
+      req.aegis.locale = localeResolution.locale;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'localeSource')) {
+      req.aegis.localeSource = localeResolution.source;
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'setLocale')) {
+      req.aegis.setLocale = (nextLocale, options = {}) => {
+        const safeOptions = isPlainObject(options) ? options : {};
+        const resolvedLocale = resolveSupportedLocale(
+          nextLocale,
+          i18nConfig.supported,
+          i18nConfig.defaultLocale,
+        );
+
+        req.aegis.locale = resolvedLocale;
+        req.aegis.localeSource = 'manual';
+
+        const shouldPersist = safeOptions.persist !== false;
+        if (shouldPersist && i18nConfig.cookieName && typeof res.cookie === 'function') {
+          res.cookie(i18nConfig.cookieName, resolvedLocale, {
+            path: '/',
+            sameSite: 'lax',
+            httpOnly: false,
+          });
+        }
+
+        return req.aegis.locale;
+      };
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(req.aegis, 't')) {
+      req.aegis.t = createTranslator(
+        i18nConfig,
+        () => resolveSupportedLocale(req.aegis.locale, i18nConfig.supported, i18nConfig.defaultLocale),
+      );
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'i18n')) {
+      req.aegis.i18n = {
+        enabled: i18nConfig.enabled,
+        defaultLocale: i18nConfig.defaultLocale,
+        fallbackLocale: i18nConfig.fallbackLocale,
+        supported: [...i18nConfig.supported],
+        queryParam: i18nConfig.queryParam,
+        cookieName: i18nConfig.cookieName,
+      };
+    }
+
+    if (
+      i18nConfig.enabled
+      && localeResolution.source === 'query'
+      && i18nConfig.cookieName
+      && typeof res.cookie === 'function'
+    ) {
+      res.cookie(i18nConfig.cookieName, localeResolution.locale, {
+        path: '/',
+        sameSite: 'lax',
+        httpOnly: false,
+      });
+    }
+
     next();
   });
 }
@@ -1732,6 +2237,13 @@ function attachTemplateHelpers(expressApp, templateConfig, logger, runtimeHelper
     res.locals.helpers = res.locals.helpers || helperSet;
     res.locals.jlive = res.locals.jlive || jliveBridge;
 
+    if (!Object.prototype.hasOwnProperty.call(res.locals, 'locale') && typeof req.aegis?.locale === 'string') {
+      res.locals.locale = req.aegis.locale;
+    }
+    if (!Object.prototype.hasOwnProperty.call(res.locals, 't') && typeof req.aegis?.t === 'function') {
+      res.locals.t = req.aegis.t;
+    }
+
     if (!Object.prototype.hasOwnProperty.call(res.locals, 'money') && typeof helperSet.money === 'function') {
       res.locals.money = helperSet.money;
     }
@@ -1787,11 +2299,28 @@ function attachTemplateHelpers(expressApp, templateConfig, logger, runtimeHelper
 
         delete scopedLocals.layout;
 
+        const appScopedLayout = (() => {
+          const appName = typeof req?.aegis?.appName === 'string' ? req.aegis.appName.trim() : '';
+          if (!appName || !isPlainObject(templateConfig.appBases)) {
+            return undefined;
+          }
+
+          if (!Object.prototype.hasOwnProperty.call(templateConfig.appBases, appName)) {
+            return undefined;
+          }
+
+          return templateConfig.appBases[appName];
+        })();
+
         const requestedLayout = layoutOverride === false || layoutOverride === null
           ? null
           : (typeof layoutOverride === 'string' && layoutOverride.trim().length > 0
               ? normalizeTemplateName(layoutOverride, 'layout')
-              : templateConfig.base);
+              : (appScopedLayout === null
+                  ? null
+                  : (typeof appScopedLayout === 'string' && appScopedLayout.length > 0
+                      ? normalizeTemplateName(appScopedLayout, 'app layout')
+                      : templateConfig.base)));
 
         const body = await renderTemplateFile({
           templatesRoot: templateConfig.root,

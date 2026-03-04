@@ -117,6 +117,18 @@ export function defaultConfig(rootDir) {
       dir: 'templates',
       base: 'base',
     },
+    i18n: {
+      enabled: false,
+      defaultLocale: 'en',
+      fallbackLocale: 'en',
+      supported: ['en'],
+      queryParam: 'lang',
+      cookieName: 'aegis_locale',
+      detectFromHeader: true,
+      detectFromCookie: true,
+      detectFromQuery: true,
+      translations: {},
+    },
     security: {
       appSecret: '',
       headers: {

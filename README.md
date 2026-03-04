@@ -22,7 +22,7 @@ AegisNode is a modular, view-first Node.js framework starter with:
 - `createapp` uses file modules: `views.js`, `models.js`, `validators.js`, `routes.js`, `subscribers.js`, `services.js`
 - `createapp` also generates app tests in `apps/<app>/tests`
 - EJS templates configurable in `settings.js` with Django-style base layout flow
-- Built-in runtime helpers (`money`, `number`, `dateTime`, `timeElapsed`) + `jlive` bridge
+- Built-in runtime helpers (`money`, `number`, `dateTime`, `timeElapsed`, `toObjectId`) + `jlive` bridge
 
 `startproject` creates `settings.js` and `routes.js` without creating any default app.
 It does not create `public/` or `logs/`; create your own folders and set them in `settings.js`.
@@ -124,7 +124,7 @@ export default {
 
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
-- Add optional blocks manually only when needed: `templates`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- Add optional blocks manually only when needed: `templates`, `i18n`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
 <!-- SETTINGS_REFERENCE_START -->
@@ -152,6 +152,7 @@ Merge order used at startup:
 | `port` | `number` / `process.env.PORT || 3000` | Bind port for HTTP server. |
 | `staticDir` | `string \| null` / `null` | Static assets directory, relative to project root (if set). |
 | `templates` | `object \| false` / see templates table | EJS template engine + layout settings. |
+| `i18n` | `object` / see i18n table | Built-in locale detection + request translator (`req.aegis.t`). |
 | `security` | `object` / see security tables | Security headers, DDoS limiter, CSRF settings, app secret. |
 | `logging` | `object` / `{ level: 'info' }` | Runtime logger level. |
 | `database` | `object` / see database table | SQL or MongoDB connection settings. |
@@ -179,12 +180,36 @@ Notes:
 | `engine` | `string` / `'ejs'` | Template engine. Only `ejs` is supported. |
 | `dir` | `string` / `'templates'` | Templates folder (absolute or relative to project root). |
 | `base` | `string \| false \| null` / `'base'` | Default layout template (without `.ejs`). Set `false`/`null` to disable layout wrapping globally. |
+| `appBases` | `object` / `{}` | Per-app layout override map: `{ appName: 'layout/name' }`. Set app value to `false`/`null` to disable layout for that app only. |
 | `locals` | `object \| function` / `{}` | Global locals. If function, signature is `({ req, res, helpers, jlive }) => object`. |
 
 Layout notes:
 - `res.render('view', data)` renders `view.ejs` and wraps it with `base.ejs` (or configured layout).
+- Per-app layout override: `templates.appBases = { users: 'users/base', admin: 'admin/base' }`.
 - In layout, both `<%- body %>` and `<%- content %>` are available.
 - Per-render layout override: pass `layout: 'custom-layout'` or `layout: false` in locals.
+
+### Internationalization (`i18n`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable built-in i18n translator bridge. |
+| `defaultLocale` | `string` / `'en'` | Default locale used when detection fails. |
+| `fallbackLocale` | `string` / `'en'` | Fallback locale used when key is missing in active locale. |
+| `supported` | `string[]` / `['en']` | Allowed locales. Values normalize to lowercase (for example `en-US` -> `en-us`). |
+| `queryParam` | `string` / `'lang'` | Query parameter used for locale selection (for example `?lang=fr`). |
+| `cookieName` | `string` / `'aegis_locale'` | Cookie used to persist locale. |
+| `detectFromHeader` | `boolean` / `true` | Enable locale detection from `Accept-Language` header. |
+| `detectFromCookie` | `boolean` / `true` | Enable locale detection from configured cookie. |
+| `detectFromQuery` | `boolean` / `true` | Enable locale detection from query parameter. |
+| `translations` | `object` / `{}` | Translation map by locale. Values can be objects or JSON file paths: `{ en: { ... }, fr: 'locales/fr.json' }`. Alias keys `locales` and `messages` are also accepted. |
+| `translationsFile` | `string` / unset | Path to a JSON file containing all locales (example: `{ "en": {...}, "fr": {...} }`). Inline `translations` overrides file values for same locale keys. |
+
+i18n notes:
+- Detection order: query -> cookie -> `Accept-Language` -> `defaultLocale`.
+- Use dotted keys like `home.title`.
+- Placeholder interpolation supports `{name}` style tokens.
+- Relative JSON paths resolve from project root (`settings.js` location).
 
 ### Security (`security`)
 
@@ -261,7 +286,7 @@ CSRF notes:
 | Key | Type / Default | Description |
 | --- | --- | --- |
 | `enabled` | `boolean` / `false` | Enable database bootstrap. |
-| `dialect` | `string` / `'pg'` | SQL: `mysql`, `pg`/`postgres`/`postgresql`, `sqlite`, `mssql`, `oracle`; NoSQL: `mongo`/`mongodb`. |
+| `dialect` | `string` / `'pg'` | SQL: `mysql`, `pg`/`postgres`/`postgresql`, `sqlite`, `mssql`, `oracle`; NoSQL: `mongo`/`mongodb`/`mongoose`. |
 | `config` | `object` / `{}` | Connection options passed to database driver. |
 | `options` | `object` / `{}` | Extra options (used directly for Mongo when enabled). |
 | `uri` | `string` / unset | Legacy Mongo URI fallback (still accepted). Prefer `config.connectionString`. |
@@ -772,12 +797,12 @@ What this enables:
 
 ## Database Config
 
-Use `database.config` for every dialect (SQL and MongoDB):
+Use `database.config` for every dialect (SQL and MongoDB/Mongoose):
 
 ```js
 database: {
   enabled: true,
-  dialect: 'pg', // pg | mysql | mssql | sqlite | oracle | mongo | mongodb
+  dialect: 'pg', // pg | mysql | mssql | sqlite | oracle | mongo | mongodb | mongoose
   config: {
     // SQL example:
     server: 'localhost',
@@ -801,6 +826,42 @@ database: {
 
 Legacy note:
 - `database.uri` is still accepted for MongoDB, but `database.config.connectionString` is preferred.
+
+Model usage for `mongo` / `mongodb` / `mongoose`:
+- `dbClient` is a QueryMesh client, so you can use the same fluent API as SQL models.
+
+```js
+class UsersModel {
+  constructor({ dbClient }) {
+    this.db = dbClient;
+  }
+
+  async list() {
+    return this.db.table('users').select(['id', 'name']).get();
+  }
+}
+```
+
+Mongo `_id` / `ObjectId` handling:
+- Use built-in helper `helpers.toObjectId(...)` before filtering on `_id`.
+- Validate with `helpers.isObjectId(...)` when needed.
+- Keep this conversion in model/service layer.
+- If your collection stores string `_id` values (not native Mongo `ObjectId`), skip conversion.
+
+```js
+class UsersModel {
+  constructor({ dbClient, helpers }) {
+    this.db = dbClient;
+    this.helpers = helpers;
+  }
+
+  async findById(id) {
+    const _id = this.helpers.toObjectId(id);
+    if (!_id) throw new Error('Invalid Mongo ObjectId');
+    return this.db.table('users').where('_id', '=', _id).first();
+  }
+}
+```
 
 ## Environment Overrides (Single settings.js)
 
@@ -1201,6 +1262,10 @@ templates: {
   engine: 'ejs',
   dir: 'templates',
   base: 'base',
+  appBases: {
+    users: 'users/base',
+    admin: 'admin/base',
+  },
 }
 ```
 
@@ -1218,6 +1283,106 @@ route.get('/', (req, res) => {
 `home.ejs` is rendered first, then injected into `base.ejs`.
 Use `<%- content %>` (or `<%- body %>`) in your `base.ejs` to print page content.
 
+## Internationalization (i18n)
+
+Configure i18n in `settings.js`:
+
+```js
+i18n: {
+  enabled: true,
+  defaultLocale: 'en',
+  fallbackLocale: 'en',
+  supported: ['en', 'fr'],
+  queryParam: 'lang',
+  translations: {
+    en: {
+      home: {
+        title: 'Welcome {name}',
+      },
+    },
+    fr: {
+      home: {
+        title: 'Bienvenue {name}',
+      },
+    },
+  },
+}
+```
+
+You can also load locale JSON files directly (no import needed):
+
+```js
+i18n: {
+  enabled: true,
+  defaultLocale: 'en',
+  supported: ['en', 'fr'],
+  translations: {
+    en: 'locales/en.json',
+    fr: 'locales/fr.json',
+  },
+  // optional single-file source (inline `translations` wins per locale key):
+  // translationsFile: 'locales/all.json',
+}
+```
+
+Route usage:
+
+```js
+route.get('/i18n-demo', (req, res) => {
+  // Auto-detected from query/cookie/header.
+  res.json({
+    locale: req.aegis.locale,
+    title: req.aegis.t('home.title', { name: 'Jason' }),
+  });
+});
+```
+
+Template usage:
+
+```ejs
+<html lang="<%= locale %>">
+  <body>
+    <h1><%= t('home.title', { name: 'Jason' }) %></h1>
+  </body>
+</html>
+```
+
+Manual locale switch inside a request:
+
+```js
+route.get('/fr', (req, res) => {
+  req.aegis.setLocale('fr'); // persists in i18n cookie by default
+  res.send(req.aegis.t('home.title', { name: 'Jason' }));
+});
+```
+
+Persist user-selected language as default:
+
+```js
+route.post('/lang', (req, res) => {
+  const selected = String(req.body?.lang || '').trim();
+  req.aegis.setLocale(selected); // writes i18n cookie (aegis_locale by default)
+  res.redirect('back');
+});
+```
+
+Language picker template (keeps selected option):
+
+```ejs
+<form method="post" action="/lang">
+  <select name="lang">
+    <option value="en" <%= locale === 'en' ? 'selected' : '' %>>English</option>
+    <option value="fr" <%= locale === 'fr' ? 'selected' : '' %>>Français</option>
+  </select>
+  <button type="submit">Change</button>
+</form>
+```
+
+Notes:
+- `defaultLocale` is used only when user has no saved locale.
+- After selection, cookie locale becomes the default for that user on next requests.
+- `?lang=fr` also persists automatically when `detectFromQuery` is enabled.
+
 ## Helpers And jlive
 
 Helpers and the `jlive` bridge are available in request context (`req.aegis`) and in EJS locals.
@@ -1225,7 +1390,7 @@ They are also available in:
 - Service constructors (`constructor({ helpers, jlive, models, ... })`)
 - Model constructors (`constructor({ helpers, jlive, dbClient, ... })`)
 - Subscribers context (`registerSubscribers({ helpers, jlive, events, ... })`)
-- Any view/handler via request bridge: `req.aegis.helpers`, `req.aegis.jlive`
+- Any view/handler via request bridge: `req.aegis.helpers`, `req.aegis.jlive`, `req.aegis.locale`, `req.aegis.t`
 
 Route usage:
 
@@ -1239,6 +1404,8 @@ export default {
         createdAgoShort: req.aegis.helpers.timeElapsed(Math.floor(Date.now() / 1000) - 60, true),
         progress: req.aegis.helpers.timeDifference(65, 0, 100),
         summary: req.aegis.helpers.breakStr('AegisNode framework helper utilities', 18, '...', true),
+        objectIdValid: req.aegis.helpers.isObjectId('507f1f77bcf86cd799439011'),
+        objectIdString: req.aegis.helpers.toObjectId('507f1f77bcf86cd799439011')?.toString() || null,
         secret: req.aegis.jlive.generate(32),
         jliveAvailable: req.aegis.jlive.available,
       });
@@ -1267,12 +1434,20 @@ Available EJS locals:
 - `timeElapsed`
 - `timeDifference`
 - `breakStr`
+- `isObjectId`
+- `toObjectId`
+- `locale`
+- `t`
 - `csrfToken` (raw hidden input HTML)
 - `csrfValue` (token string)
 
 `timeElapsed` supports both styles:
 - `timeElapsed(value, { now, locale, numeric })` (Intl relative style)
 - `timeElapsed(unixTime, true)` (short legacy-style mode)
+
+Mongo id helpers:
+- `isObjectId(value)` validates Mongo ObjectId format.
+- `toObjectId(value)` returns a Mongo ObjectId instance or `null` when invalid.
 
 `jlive` behavior:
 - If `jlive` package is installed, bridge uses its methods.

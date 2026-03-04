@@ -1,6 +1,7 @@
 import QueryMesh from 'querymesh';
 
 const SQL_DIALECTS = new Set(['mysql', 'pg', 'postgres', 'postgresql', 'sqlite', 'mssql', 'oracle']);
+const NOSQL_DIALECTS = new Set(['mongo', 'mongodb', 'mongoose']);
 
 function isPlainObject(value) {
   return Boolean(value) && Object.prototype.toString.call(value) === '[object Object]';
@@ -18,6 +19,14 @@ function normalizeSqlDialect(dialect) {
   const normalized = String(dialect || '').toLowerCase();
   if (normalized === 'postgres' || normalized === 'postgresql') {
     return 'pg';
+  }
+  return normalized;
+}
+
+function normalizeNoSqlDialect(dialect) {
+  const normalized = String(dialect || '').toLowerCase();
+  if (normalized === 'mongodb' || normalized === 'mongoose') {
+    return 'mongo';
   }
   return normalized;
 }
@@ -71,6 +80,51 @@ function redactConnectionUri(uri) {
   }
 }
 
+function buildQueryMeshMongoConfig(databaseConfig) {
+  const mongoConfig = isPlainObject(databaseConfig?.config) ? { ...databaseConfig.config } : {};
+
+  const legacyUri = asNonEmptyString(databaseConfig?.uri);
+  if (legacyUri
+    && !asNonEmptyString(mongoConfig.connectionString)
+    && !asNonEmptyString(mongoConfig.uri)) {
+    mongoConfig.connectionString = legacyUri;
+  }
+
+  const hasDirectConnectionHandle = Boolean(
+    mongoConfig.db
+    || mongoConfig.connection
+    || mongoConfig.mongooseConnection
+    || mongoConfig.mongoose,
+  );
+
+  if (
+    !asNonEmptyString(mongoConfig.connectionString)
+    && !asNonEmptyString(mongoConfig.uri)
+    && !hasDirectConnectionHandle
+  ) {
+    mongoConfig.connectionString = buildMongoUriFromConfig(mongoConfig);
+  }
+
+  const options = resolveMongoOptions(databaseConfig, mongoConfig);
+  if (
+    isPlainObject(options)
+    && Object.keys(options).length > 0
+    && !isPlainObject(mongoConfig.options)
+    && !isPlainObject(mongoConfig.clientOptions)
+  ) {
+    mongoConfig.options = options;
+  }
+
+  return mongoConfig;
+}
+
+function extractMongoConnectionUri(mongoConfig) {
+  return asNonEmptyString(
+    mongoConfig?.connectionString,
+    asNonEmptyString(mongoConfig?.uri),
+  );
+}
+
 export async function initializeDatabase(databaseConfig, logger) {
   if (!databaseConfig?.enabled) {
     logger.info('Database disabled by configuration.');
@@ -95,28 +149,29 @@ export async function initializeDatabase(databaseConfig, logger) {
     };
   }
 
-  if (dialect === 'mongo' || dialect === 'mongodb') {
-    let mongooseModule;
-    try {
-      mongooseModule = await import('mongoose');
-    } catch (error) {
-      throw new Error('MongoDB selected but mongoose is not available. Install mongoose in the project.');
+  if (NOSQL_DIALECTS.has(dialect)) {
+    const noSqlDialect = normalizeNoSqlDialect(dialect);
+    const mongoConfig = buildQueryMeshMongoConfig(databaseConfig);
+    const client = await QueryMesh.connect({
+      dialect: noSqlDialect,
+      config: mongoConfig,
+    });
+
+    const uri = extractMongoConnectionUri(mongoConfig);
+    if (uri) {
+      logger.info(
+        'NoSQL database connected with dialect %s via QueryMesh at %s',
+        dialect,
+        redactConnectionUri(uri),
+      );
+    } else {
+      logger.info('NoSQL database connected with dialect %s via QueryMesh', dialect);
     }
-
-    const mongoose = mongooseModule.default ?? mongooseModule;
-    const mongoConfig = isPlainObject(databaseConfig.config) ? databaseConfig.config : {};
-    const legacyUri = asNonEmptyString(databaseConfig.uri);
-    const uri = legacyUri || buildMongoUriFromConfig(mongoConfig);
-    const options = resolveMongoOptions(databaseConfig, mongoConfig);
-    const connection = await mongoose.connect(uri, options);
-
-    logger.info('MongoDB connected at %s', redactConnectionUri(uri));
 
     return {
       type: 'nosql',
-      dialect: 'mongodb',
-      client: connection,
-      mongoose,
+      dialect: noSqlDialect === 'mongo' ? 'mongodb' : noSqlDialect,
+      client,
     };
   }
 
@@ -128,12 +183,13 @@ export async function closeDatabase(db) {
     return;
   }
 
-  if (db.type === 'nosql' && db.mongoose?.connection?.close) {
-    await db.mongoose.connection.close();
+  if (db.client && typeof db.client.close === 'function') {
+    await db.client.close();
     return;
   }
 
-  if (db.client && typeof db.client.close === 'function') {
-    await db.client.close();
+  // Legacy fallback for older runtime return shapes.
+  if (db.type === 'nosql' && db.mongoose?.connection?.close) {
+    await db.mongoose.connection.close();
   }
 }
