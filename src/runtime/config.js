@@ -129,6 +129,12 @@ export function defaultConfig(rootDir) {
       detectFromQuery: true,
       translations: {},
     },
+    helpers: {
+      locale: 'en-US',
+      money: {
+        currency: 'USD',
+      },
+    },
     security: {
       appSecret: '',
       headers: {

@@ -2783,7 +2783,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
 
   const logger = createLogger({ level: config.logging?.level, name: config.appName || 'aegisnode' });
   const defaultInstallTemplate = await loadDefaultInstallTemplate(logger);
-  const runtimeHelpers = await createRuntimeHelpers({ logger });
+  const runtimeHelpers = await createRuntimeHelpers({ logger, config });
   const upload = await createUploadManager(config.uploads, logger);
   const container = createContainer();
   const events = createEventBus();

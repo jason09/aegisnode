@@ -124,7 +124,7 @@ export default {
 
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
-- Add optional blocks manually only when needed: `templates`, `i18n`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- Add optional blocks manually only when needed: `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
 <!-- SETTINGS_REFERENCE_START -->
@@ -153,6 +153,7 @@ Merge order used at startup:
 | `staticDir` | `string \| null` / `null` | Static assets directory, relative to project root (if set). |
 | `templates` | `object \| false` / see templates table | EJS template engine + layout settings. |
 | `i18n` | `object` / see i18n table | Built-in locale detection + request translator (`req.aegis.t`). |
+| `helpers` | `object` / see helpers table | Runtime helper defaults (for example currency/locale for `helpers.money`). |
 | `security` | `object` / see security tables | Security headers, DDoS limiter, CSRF settings, app secret. |
 | `logging` | `object` / `{ level: 'info' }` | Runtime logger level. |
 | `database` | `object` / see database table | SQL or MongoDB connection settings. |
@@ -211,6 +212,23 @@ i18n notes:
 - Placeholder interpolation supports `{name}` style tokens.
 - Relative JSON paths resolve from project root (`settings.js` location).
 
+### Helpers Defaults (`helpers`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `locale` | `string` / `'en-US'` | Default locale used by runtime helpers when locale is not passed explicitly. |
+| `money` | `object` / `{ currency: 'USD' }` | Default money formatting settings used by `helpers.money`. |
+| `money.currency` | `string` / `'USD'` | Default currency code for `helpers.money(amount)` when no currency option is provided. |
+| `money.locale` | `string` / `helpers.locale` | Locale override only for `helpers.money`. |
+| `money.currencyDisplay` | `'symbol' | 'code' | 'name' | 'narrowSymbol'` / `'symbol'` | Currency display style passed to `Intl.NumberFormat`. |
+| `money.minimumFractionDigits` | `number` / unset | Optional minimum fraction digits for money formatting. |
+| `money.maximumFractionDigits` | `number` / unset | Optional maximum fraction digits for money formatting. |
+
+Helpers defaults notes:
+- Per-call options always override these defaults.
+- If `helpers.locale` is not set, AegisNode falls back to `i18n.defaultLocale` for helper locale.
+- Legacy shorthand keys are also accepted for compatibility: `helpers.currency`, top-level `currency`, and `app.currency`.
+
 ### Security (`security`)
 
 | Key | Type / Default | Description |
@@ -236,6 +254,46 @@ i18n notes:
 | `directives` | `object` / `{}` | Directive overrides. Set a directive to `false`/`null` to remove it. |
 
 Default CSP base includes safe defaults such as `defaultSrc 'self'`, `objectSrc 'none'`, `frameAncestors 'none'`, and websocket-aware `connectSrc`.
+
+Allow multiple external domains by adding them per directive (not globally):
+
+```js
+security: {
+  headers: {
+    csp: {
+      directives: {
+        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net', 'https://unpkg.com'],
+        scriptSrcElem: ["'self'", 'https://cdn.jsdelivr.net', 'https://unpkg.com'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+        styleSrcElem: ["'self'", 'https://cdn.jsdelivr.net'],
+        imgSrc: ["'self'", 'data:', 'https://cdn.jsdelivr.net'],
+        connectSrc: ["'self'", 'https://api.example.com', 'wss://socket.example.com'],
+      },
+    },
+  },
+},
+```
+
+Notes:
+- Add each origin to the exact directive needed (scripts, styles, images, API/WebSocket connections).
+- If browser reports a `script-src-elem` violation, whitelist the domain in `scriptSrcElem`.
+- Prefer explicit origins instead of `*` in production.
+
+Google Fonts example:
+
+```js
+security: {
+  headers: {
+    csp: {
+      directives: {
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        styleSrcElem: ["'self'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+      },
+    },
+  },
+},
+```
 
 #### DDoS / Rate Limit (`security.ddos`)
 
@@ -1392,6 +1450,20 @@ They are also available in:
 - Subscribers context (`registerSubscribers({ helpers, jlive, events, ... })`)
 - Any view/handler via request bridge: `req.aegis.helpers`, `req.aegis.jlive`, `req.aegis.locale`, `req.aegis.t`
 
+Set helper defaults in `settings.js` (currency/locale):
+
+```js
+helpers: {
+  locale: 'fr-FR',
+  money: {
+    currency: 'EUR',
+    currencyDisplay: 'code',
+  },
+},
+```
+
+Then `helpers.money(2500)` automatically uses your configured defaults unless you pass per-call overrides.
+
 Route usage:
 
 ```js
@@ -1809,6 +1881,7 @@ If you run behind a reverse proxy, set `security.ddos.trustProxy` (for example `
 
 Set `security.headers.enabled = false` to disable Helmet.
 Set `security.headers.csp.enabled = false` to disable CSP only.
+If you need third-party assets, prefer adding allowed origins under `security.headers.csp.directives` instead of disabling CSP.
 Set `security.ddos.enabled = false` to disable rate limiting.
 Set `security.csrf.enabled = false` to disable CSRF middleware.
 

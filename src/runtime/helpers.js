@@ -22,6 +22,74 @@ function asFiniteNumber(value, fallback = 0) {
   return fallback;
 }
 
+function normalizeMoneyDefaults(rawDefaults) {
+  const defaults = isPlainObject(rawDefaults) ? rawDefaults : {};
+  const normalized = {};
+
+  const locale = asNonEmptyString(defaults.locale);
+  if (locale) {
+    normalized.locale = locale;
+  }
+
+  const currency = asNonEmptyString(defaults.currency);
+  if (currency) {
+    normalized.currency = currency.toUpperCase();
+  }
+
+  const currencyDisplay = asNonEmptyString(defaults.currencyDisplay);
+  if (currencyDisplay) {
+    normalized.currencyDisplay = currencyDisplay;
+  }
+
+  if (Number.isInteger(defaults.minimumFractionDigits) && defaults.minimumFractionDigits >= 0) {
+    normalized.minimumFractionDigits = defaults.minimumFractionDigits;
+  }
+
+  if (Number.isInteger(defaults.maximumFractionDigits) && defaults.maximumFractionDigits >= 0) {
+    normalized.maximumFractionDigits = defaults.maximumFractionDigits;
+  }
+
+  return normalized;
+}
+
+function resolveRuntimeHelperDefaults(config = null) {
+  const source = isPlainObject(config) ? config : {};
+  const helperConfig = isPlainObject(source.helpers) ? source.helpers : {};
+  const moneyConfig = isPlainObject(helperConfig.money) ? helperConfig.money : {};
+  const i18nConfig = isPlainObject(source.i18n) ? source.i18n : {};
+  const appConfig = isPlainObject(source.app) ? source.app : {};
+
+  const locale = asNonEmptyString(
+    helperConfig.locale,
+    asNonEmptyString(
+      moneyConfig.locale,
+      asNonEmptyString(i18nConfig.defaultLocale, 'en-US'),
+    ),
+  );
+
+  const currency = asNonEmptyString(
+    moneyConfig.currency,
+    asNonEmptyString(
+      helperConfig.currency,
+      asNonEmptyString(
+        appConfig.currency,
+        asNonEmptyString(
+          appConfig.Currency,
+          asNonEmptyString(source.currency, asNonEmptyString(source.Currency, 'USD')),
+        ),
+      ),
+    ),
+  );
+
+  return {
+    money: normalizeMoneyDefaults({
+      ...moneyConfig,
+      locale,
+      currency,
+    }),
+  };
+}
+
 function toDate(value) {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value;
@@ -140,21 +208,33 @@ export function toObjectId(value) {
   }
 }
 
-export function money(value, options = {}) {
+export function money(value, options = {}, defaults = null) {
   const amount = asFiniteNumber(value, Number.NaN);
   if (!Number.isFinite(amount)) {
     return '';
   }
 
-  const locale = asNonEmptyString(options.locale, 'en-US');
-  const currency = asNonEmptyString(options.currency, 'USD');
+  const safeOptions = isPlainObject(options) ? options : {};
+  const safeDefaults = isPlainObject(defaults) ? defaults : {};
+  const locale = asNonEmptyString(safeOptions.locale, asNonEmptyString(safeDefaults.locale, 'en-US'));
+  const currency = asNonEmptyString(safeOptions.currency, asNonEmptyString(safeDefaults.currency, 'USD')).toUpperCase();
+  const currencyDisplay = asNonEmptyString(
+    safeOptions.currencyDisplay,
+    asNonEmptyString(safeDefaults.currencyDisplay, 'symbol'),
+  );
+  const minimumFractionDigits = Number.isInteger(safeOptions.minimumFractionDigits)
+    ? safeOptions.minimumFractionDigits
+    : (Number.isInteger(safeDefaults.minimumFractionDigits) ? safeDefaults.minimumFractionDigits : undefined);
+  const maximumFractionDigits = Number.isInteger(safeOptions.maximumFractionDigits)
+    ? safeOptions.maximumFractionDigits
+    : (Number.isInteger(safeDefaults.maximumFractionDigits) ? safeDefaults.maximumFractionDigits : undefined);
 
   const formatter = new Intl.NumberFormat(locale, {
     style: 'currency',
     currency,
-    currencyDisplay: options.currencyDisplay || 'symbol',
-    minimumFractionDigits: Number.isInteger(options.minimumFractionDigits) ? options.minimumFractionDigits : undefined,
-    maximumFractionDigits: Number.isInteger(options.maximumFractionDigits) ? options.maximumFractionDigits : undefined,
+    currencyDisplay,
+    minimumFractionDigits,
+    maximumFractionDigits,
   });
 
   return formatter.format(amount);
@@ -371,9 +451,17 @@ export function breakStr(str, nb, endText = '', spBreak = false) {
   return clipped + String(endText ?? '');
 }
 
-export function createHelpers() {
+export function createHelpers(defaults = {}) {
+  const sourceDefaults = isPlainObject(defaults) ? defaults : {};
+  const moneyDefaults = normalizeMoneyDefaults({
+    locale: sourceDefaults.locale,
+    ...(isPlainObject(sourceDefaults.money) ? sourceDefaults.money : {}),
+  });
+
   return {
-    money,
+    money(value, options = {}) {
+      return money(value, options, moneyDefaults);
+    },
     number,
     dateTime,
     timeElapsed,
@@ -475,8 +563,9 @@ export async function loadJlive(logger = null) {
   }
 }
 
-export async function createRuntimeHelpers({ logger = null } = {}) {
-  const helpers = createHelpers();
+export async function createRuntimeHelpers({ logger = null, config = null } = {}) {
+  const helperDefaults = resolveRuntimeHelperDefaults(config);
+  const helpers = createHelpers(helperDefaults);
   const jlive = await loadJlive(logger);
 
   return {
