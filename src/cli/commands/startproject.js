@@ -5,6 +5,7 @@ import {
   renderEnvExample,
   renderProjectAppJs,
   renderProjectGitIgnore,
+  renderProjectLoaderCjs,
   renderProjectPackageJson,
   renderProjectRoutes,
   renderProjectSettings,
@@ -45,6 +46,7 @@ async function createBaseProjectFiles(projectRoot, projectName) {
   ]);
 
   await writeFile(path.join(projectRoot, 'app.js'), renderProjectAppJs());
+  await writeFile(path.join(projectRoot, 'loader.cjs'), renderProjectLoaderCjs());
   await writeFile(path.join(projectRoot, 'package.json'), renderProjectPackageJson(projectName));
   await writeFile(path.join(projectRoot, '.gitignore'), renderProjectGitIgnore());
   await writeFile(path.join(projectRoot, '.env.example'), renderEnvExample());

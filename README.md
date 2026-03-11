@@ -24,7 +24,7 @@ AegisNode is a modular, view-first Node.js framework starter with:
 - EJS templates configurable in `settings.js` with Django-style base layout flow
 - Built-in runtime helpers (`money`, `number`, `dateTime`, `timeElapsed`, `toObjectId`) + `jlive` bridge
 
-`startproject` creates `settings.js` and `routes.js` without creating any default app.
+`startproject` creates `app.js`, `loader.cjs`, `settings.js`, and `routes.js` without creating any default app.
 It does not create `public/` or `logs/`; create your own folders and set them in `settings.js`.
 
 ## CLI
@@ -47,10 +47,29 @@ aegisnode doctor --project blog
 `createapp`, `generate`, `runserver`, and `doctor` are project-level commands.
 Run them from the project root; do not `cd` into `apps/<app>`.
 
+## Deploy On Phusion Passenger
+
+AegisNode supports Passenger-style startup using the generated `loader.cjs`.
+
+Passenger setup (Apache/Nginx/Plesk/cPanel/etc.):
+1. Set **Application Root** to your project folder.
+2. Set **Startup File** to `loader.cjs`.
+3. Install dependencies in project root (for example: `npm install --omit=dev`).
+4. Set environment variables (at minimum `NODE_ENV=production`; keep `PORT` managed by Passenger).
+5. Restart the Node app from your hosting panel/service.
+
+Plesk note: these map to **Application Root** and **Application Startup File** fields.
+
+How it works:
+- `loader.cjs` imports `app.js`.
+- `app.js` starts AegisNode with project root resolved from its own file location, so it works correctly under Passenger.
+
+
 Generated routes are auto-wired into `apps/<app>/routes.js`.
 `createapp` auto-detects the project root when run inside the project or from a parent folder containing exactly one AegisNode project.
 After `createapp user`, `routes.js` is updated with central mapping style:
 `route.use('/user', user);`
+Only apps declared in `settings.apps` are allowed to load/mount. Startup fails when routes reference an undeclared app.
 `--mount` accepts only safe path segments (`a-z`, `A-Z`, `0-9`, `_`, `-`, `:`).
 
 By default, new app routes are API-ready:
@@ -535,6 +554,7 @@ Rules:
 - `name` is required in object form.
 - `mount` defaults to `/${name}`.
 - Mounts are normalized to a single leading slash (except root `/`).
+- App route modules must be declared in `settings.apps` before they can load/mount.
 
 ### Environment Overrides (`environments`)
 

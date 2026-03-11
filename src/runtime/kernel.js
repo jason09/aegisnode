@@ -781,6 +781,7 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
       services: appName ? layerAccessors.servicesForApp(appName) : layerAccessors.services,
       models: appName ? layerAccessors.modelsForApp(appName) : layerAccessors.models,
       validators: appName ? layerAccessors.validatorsForApp(appName) : layerAccessors.validators,
+      declaredAppNames: context.declaredAppNames,
     };
   }
 
@@ -795,6 +796,7 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
     helpers: context.helpers,
     jlive: context.jlive,
     upload: context.upload,
+    declaredAppNames: context.declaredAppNames,
     app: appDefinition || null,
     appName,
     services: appName ? layerAccessors.servicesForApp(appName) : layerAccessors.services,
@@ -1579,6 +1581,16 @@ function buildHandler(candidate, resolveRef, currentApp, runtimeContext = null) 
       const candidateAppName = typeof candidate.appName === 'string' && candidate.appName.trim().length > 0
         ? candidate.appName.trim()
         : null;
+      const declaredAppNames = runtimeContext?.declaredAppNames instanceof Set
+        ? runtimeContext.declaredAppNames
+        : null;
+
+      if (candidateAppName && declaredAppNames && !declaredAppNames.has(candidateAppName)) {
+        throw new Error(
+          `App "${candidateAppName}" is not declared in settings.apps. Declare it in settings before mounting routes.`,
+        );
+      }
+
       const nestedAppName = currentApp || candidateAppName || runtimeContext?.appName || null;
       const nestedRuntimeContext = runtimeContext && nestedAppName
         ? {
@@ -2407,6 +2419,7 @@ function buildContext({
     helpers,
     jlive,
     upload,
+    declaredAppNames: new Set(),
   };
 }
 
@@ -2859,7 +2872,24 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   if (strictLayers) {
     await enforceStrictProjectRoutes(projectRoutes?.sourceFile || path.join(rootDir, 'routes.js'));
   }
-  const declaredApps = projectRoutes?.apps?.length ? normalizeApps(projectRoutes.apps) : config.apps;
+  const settingsDeclaredApps = normalizeApps(config.apps || []);
+  const settingsDeclaredAppNames = new Set(settingsDeclaredApps.map((entry) => entry.name));
+
+  if (projectRoutes?.apps?.length) {
+    const projectDeclaredApps = normalizeApps(projectRoutes.apps);
+    const unknownApps = projectDeclaredApps
+      .map((entry) => entry.name)
+      .filter((name) => !settingsDeclaredAppNames.has(name));
+
+    if (unknownApps.length) {
+      throw new Error(
+        `Apps used in routes.js must be declared in settings.apps: ${unknownApps.join(', ')}`,
+      );
+    }
+  }
+
+  const declaredApps = settingsDeclaredApps;
+  context.declaredAppNames = new Set(declaredApps.map((entry) => entry.name));
   config.api = normalizeApiConfig(config.api, declaredApps);
 
   attachSecurityMiddlewares(expressApp, config, logger);

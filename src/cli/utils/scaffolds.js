@@ -21,7 +21,7 @@ export function renderProjectPackageJson(projectName) {
       type: 'module',
       scripts: {
         dev: 'aegisnode runserver',
-        start: 'node app.js',
+        start: 'node loader.cjs',
         test: 'node --test',
       },
       dependencies: {
@@ -34,9 +34,22 @@ export function renderProjectPackageJson(projectName) {
 }
 
 export function renderProjectAppJs() {
-  return `import { runProject } from 'aegisnode';
+  return `import path from 'path';
+import { fileURLToPath } from 'url';
+import { runProject } from 'aegisnode';
 
-runProject({ rootDir: process.cwd() });
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+runProject({ rootDir: __dirname });
+`;
+}
+
+export function renderProjectLoaderCjs() {
+  return `import('./app.js').catch((error) => {
+  console.error(error?.stack || error?.message || String(error));
+  process.exitCode = 1;
+});
 `;
 }
 

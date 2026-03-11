@@ -182,6 +182,7 @@ async function main() {
 
   const filesToCheck = [
     'app.js',
+    'loader.cjs',
     'package.json',
     'settings.js',
     'routes.js',
@@ -257,6 +258,27 @@ async function main() {
   const usersRoutesFile = await fs.readFile(path.join(projectRoot, 'apps', 'users', 'routes.js'), 'utf8');
   assert.match(usersRoutesFile, /import ProfileView from '\.\/profile\.view\.js';/);
   assert.match(usersRoutesFile, /route\.get\('\/profile', ProfileView\.index\);/);
+
+  const settingsFilePath = path.join(projectRoot, 'settings.js');
+  const settingsBeforeUndeclaredCheck = await fs.readFile(settingsFilePath, 'utf8');
+  const settingsWithoutUsers = settingsBeforeUndeclaredCheck.replace(
+    /\s*\{\s*name:\s*['"]users['"]\s*,\s*mount:\s*['"]\/users['"]\s*\},?\n?/,
+    '',
+  );
+  await fs.writeFile(settingsFilePath, settingsWithoutUsers, 'utf8');
+
+  await assert.rejects(
+    () => createKernel({
+      rootDir: projectRoot,
+      overrides: {
+        host: '127.0.0.1',
+        port: 0,
+      },
+    }),
+    /settings\.apps/,
+  );
+
+  await fs.writeFile(settingsFilePath, settingsBeforeUndeclaredCheck, 'utf8');
 
   const kernel = await createKernel({
     rootDir: projectRoot,
