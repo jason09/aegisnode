@@ -1,5 +1,6 @@
 import assert from 'assert';
 import crypto from 'crypto';
+import https from 'https';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
@@ -94,14 +95,47 @@ function createPkcePair() {
   };
 }
 
+function requestHttps(url, { method = 'GET', headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = https.request(url, {
+      method,
+      headers,
+      rejectUnauthorized: false,
+    }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        body += chunk;
+      });
+      response.on('end', () => {
+        resolve({
+          status: response.statusCode || 0,
+          headers: response.headers,
+          body,
+        });
+      });
+    });
+
+    request.on('error', reject);
+    request.end();
+  });
+}
+
 async function main() {
   const sandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-'));
   const projectName = 'blog';
   const projectRoot = path.join(sandboxRoot, projectName);
   const frameworkRoot = path.resolve(process.cwd());
   const envSandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-env-'));
+  const dotenvSandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-dotenv-'));
+  const httpsSandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-https-'));
+  const proxySandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-proxy-'));
 
   await startProject({ projectName, cwd: sandboxRoot });
+  const generatedProjectEnv = await fs.readFile(path.join(projectRoot, '.env'), 'utf8');
+  assert.match(generatedProjectEnv, /^APP_SECRET=.{16,}$/m);
+  const generatedSettings = await fs.readFile(path.join(projectRoot, 'settings.js'), 'utf8');
+  assert.match(generatedSettings, /appSecret:\s*process\.env\.APP_SECRET\s*\|\|\s*''/);
 
   const envProjectName = 'envdemo';
   const envProjectRoot = path.join(envSandboxRoot, envProjectName);
@@ -140,6 +174,155 @@ async function main() {
   assert.equal(envConfig.logging.level, 'warn');
   assert.equal(envConfig.security.ddos.windowMs, 45000);
   assert.equal(envConfig.security.ddos.maxRequests, 80);
+
+  const dotenvProjectName = 'dotenvdemo';
+  const dotenvProjectRoot = path.join(dotenvSandboxRoot, dotenvProjectName);
+  await startProject({ projectName: dotenvProjectName, cwd: dotenvSandboxRoot });
+  await fs.writeFile(
+    path.join(dotenvProjectRoot, '.env'),
+    `AEGIS_TEST_HOST=127.0.0.1
+AEGIS_TEST_PORT=4321
+AEGIS_TEST_LOG_LEVEL=warn
+AEGIS_TEST_APP_SECRET=test-dotenv-secret
+`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(dotenvProjectRoot, 'settings.js'),
+    `export default {
+  appName: 'dotenvdemo',
+  host: process.env.AEGIS_TEST_HOST || '0.0.0.0',
+  port: process.env.AEGIS_TEST_PORT ? Number(process.env.AEGIS_TEST_PORT) : 3000,
+  security: {
+    appSecret: process.env.AEGIS_TEST_APP_SECRET || '',
+  },
+  logging: {
+    level: process.env.AEGIS_TEST_LOG_LEVEL || 'info',
+  },
+  apps: [],
+};
+`,
+    'utf8',
+  );
+  const dotenvConfig = await loadProjectConfig(dotenvProjectRoot);
+  assert.equal(dotenvConfig.host, '127.0.0.1');
+  assert.equal(dotenvConfig.port, 4321);
+  assert.equal(dotenvConfig.logging.level, 'warn');
+  assert.equal(dotenvConfig.security.appSecret, 'test-dotenv-secret');
+
+  const httpsProjectName = 'httpsdemo';
+  const httpsProjectRoot = path.join(httpsSandboxRoot, httpsProjectName);
+  await startProject({ projectName: httpsProjectName, cwd: httpsSandboxRoot });
+  await fs.mkdir(path.join(httpsProjectRoot, 'certs'), { recursive: true });
+  await fs.writeFile(
+    path.join(httpsProjectRoot, 'certs', 'localhost-key.pem'),
+    `-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDC+P51c3EEyTG3
+0oBSv5RuF/EakUD8lYgftczXyRZS2tidrLpUoEw3HRMV2yPsgMByFc8ctQPgTic5
+dsUiiHid9ozl/S282i+AlrWE2xf4me9DoyC7ITQe15UBfxzqpB7ZXVrL/lQ6INgX
+KkmSEeWY+/EyxyU/cDYwzFzru5TcPwOXL8ui09siYYOD75DEMufEh6v7k4zF+9nh
+tixH8a3IRSr0MIW9WzBov1DNMRrdnG5P173Klc/4bh7eHrLk6vXC5Y6L3/B3PaVB
+6idaeY6BwAGvL1Ik1yzIGQiPyZnpLZVir+wgiiRr4M56e1kjqsigWQR9S5VKGQUH
+Sk2wccUhAgMBAAECggEAPKwTMyVrZBvf1t4whI+Ndv0IUEYnPPKjW4rNZdDzm3Dy
+u45GpZMEZJotmD2LXktql5Xlz38c564qUp19FxP0xOM2UVOJ6hzTb2Z2shMj0H7G
+j/uxccoRWA+qFL8jlnjgCLAeUyCfwT77P6ovHr9m/UZZdn22P5mBo4nU2J6U4jxG
+ll2PZe8byL0bvZAmzVZ6a38Y7n4EjJIgfGGDCBojJedbrvEMO4U83OtOXUsWCepF
+OZae3pNdHGuG8AJeUIcGYaUqAhe4/JEbJhkM9moQVLyLNSSAMknS50MeMO4pRWwJ
+rA+iqCXyWNDXgaTNs02my6q1bxVfHH4aZeOMrMmjKQKBgQDnUvQs+KskRB9LLM2T
+WReIQUP+m+s2y3+76CfEUjx7N4YG1jFRRId+grAyMHUcjbMopGi2aBxpEpveqzaH
+/5ym7Ir4vZgOQ3MxRhKLnHGZprkKfi5Z/V4L18Mc9z1UHJql+wyXlazz9h1twwIO
+R5AcI7nCrbaqwsACoGRKEN6V7wKBgQDXxVklj/4qB1hU+isy8xZBL4s46i1oGOEH
+EoLXAYSNeL1QRhsuyoBj61Q+ac1mXI97GITKHMdVRsU6qAhMZnTbxVAe3Zk2LSMA
+4qiyuHHd7J15Koe+WgKXTBh+gyDrWXlqEZXW8VY3YSltY4rf2+/EcijLvh+SKMkR
+na3fEMvl7wKBgD9UUJD3SzNUixSzoVxTqcOdypWr7gtETyYMesaelPxOyRyaC0pq
+boXOFZrH9Wfpy0C3MguuGQkTFSUyzm0RJ7vzSmCq1zQgdyroOi+Klvcv07zxqpLs
+cJDhcwM9FMcwRY5nWp0tVvo7SPdByhBKu0NY7IRFtpqtUo/lhU9ZqvZ1AoGARNVN
+MiF0eJ3tPPatz0wjHlp3dImoQJwnNWVfXg265pLM+g3TYCLzwGxzbJG+F9iRYTia
+LAvwPzEbfDHcq9rHjtCsVZxl4xWVJBQqsxEKKjzwo5XAxiXay79X1Qwp9UqO5BqG
+DZLh6TrSx3XI+M8l9ypf/1dApRTjx/3gWNf34/sCgYABb8Q1N2596ljMDezoiXBa
+jnH0e+HEbacoxhF+zPkPhuCaHwQkkhFqDA4mdTwiTDbht68G8MLh5RBMDb6AGZ3h
+L6OWwXt24ZYAs3GCFJWxiUdurw95Ce/UGBt8ShCHQqf5+8kGBZdQmX5yuyGPKEfK
+8zvKq/Ke3FmfryEqANcGNg==
+-----END PRIVATE KEY-----
+`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(httpsProjectRoot, 'certs', 'localhost-cert.pem'),
+    `-----BEGIN CERTIFICATE-----
+MIIDCTCCAfGgAwIBAgIUKfS3Uua04vAtQ1Cqq5MhhIm3KnswDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJMTI3LjAuMC4xMB4XDTI2MDMxNTE1NDQzOFoXDTI2MDMx
+NjE1NDQzOFowFDESMBAGA1UEAwwJMTI3LjAuMC4xMIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAwvj+dXNxBMkxt9KAUr+UbhfxGpFA/JWIH7XM18kWUtrY
+nay6VKBMNx0TFdsj7IDAchXPHLUD4E4nOXbFIoh4nfaM5f0tvNovgJa1hNsX+Jnv
+Q6MguyE0HteVAX8c6qQe2V1ay/5UOiDYFypJkhHlmPvxMsclP3A2MMxc67uU3D8D
+ly/LotPbImGDg++QxDLnxIer+5OMxfvZ4bYsR/GtyEUq9DCFvVswaL9QzTEa3Zxu
+T9e9ypXP+G4e3h6y5Or1wuWOi9/wdz2lQeonWnmOgcABry9SJNcsyBkIj8mZ6S2V
+Yq/sIIoka+DOentZI6rIoFkEfUuVShkFB0pNsHHFIQIDAQABo1MwUTAdBgNVHQ4E
+FgQU6TCiIGnLvsRYjRhBnjdSNu2oBKUwHwYDVR0jBBgwFoAU6TCiIGnLvsRYjRhB
+njdSNu2oBKUwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEALiwu
+RULxP/LTqypp1sQmM1WsrUv/mfMoCCVmHOeEqljLOvtYKnVjPsS8ER90dfcTJQ6B
+qJRNjWWDqnIFR90mkgBzVIp1JnV3kabShbhc+Gtd40qVEAzzXXV+PJgAIu/HjNp0
+S5XWmSz2NNVwEEMqpIm2Aej/dDmSoD1Wvx5Z8PndHTAb8yP2gJM8oK/gE0g7o3gm
+D2qu8eIsBibj/h99WhNApm4c39Sat1g9xl3dIe8xE0+hI12WtnyfuPj9TxDCai+r
+0AIsvw3CSCUSwU4Cb/1zsHQ28IfSjbU3k7mbC79ja4MqZfEy/n6G1ZNV5FjapwVy
+dkcqnJD4SGWVeG+KhA==
+-----END CERTIFICATE-----
+`,
+    'utf8',
+  );
+
+  const httpsKernel = await createKernel({
+    rootDir: httpsProjectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+      https: {
+        enabled: true,
+        keyPath: 'certs/localhost-key.pem',
+        certPath: 'certs/localhost-cert.pem',
+      },
+    },
+  });
+
+  await httpsKernel.start();
+  const httpsAddress = httpsKernel.context.server.address();
+  const httpsPort = typeof httpsAddress === 'object' && httpsAddress ? httpsAddress.port : 0;
+  const httpsResponse = await requestHttps(`https://127.0.0.1:${httpsPort}/`);
+  assert.equal(httpsResponse.status, 200);
+  assert.match(httpsResponse.body, /Install Confirmed/);
+  await httpsKernel.stop();
+
+  const proxyProjectName = 'proxydemo';
+  const proxyProjectRoot = path.join(proxySandboxRoot, proxyProjectName);
+  await startProject({ projectName: proxyProjectName, cwd: proxySandboxRoot });
+  await fs.writeFile(
+    path.join(proxyProjectRoot, 'routes.js'),
+    `export default {\n  register(route) {\n    route.get('/secure-check', (req, res) => {\n      res.json({ secure: req.secure, protocol: req.protocol });\n    });\n  },\n};\n`,
+    'utf8',
+  );
+
+  const proxyKernel = await createKernel({
+    rootDir: proxyProjectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+      trustProxy: 1,
+    },
+  });
+
+  await proxyKernel.start();
+  const proxyAddress = proxyKernel.context.server.address();
+  const proxyPort = typeof proxyAddress === 'object' && proxyAddress ? proxyAddress.port : 0;
+  const proxyResponse = await fetch(`http://127.0.0.1:${proxyPort}/secure-check`, {
+    headers: {
+      'x-forwarded-proto': 'https',
+    },
+  });
+  const proxyJson = await proxyResponse.json();
+  assert.equal(proxyJson.secure, true);
+  assert.equal(proxyJson.protocol, 'https');
+  await proxyKernel.stop();
 
   const helpers = createHelpers();
   const validObjectId = '507f1f77bcf86cd799439011';
@@ -1151,6 +1334,47 @@ async function main() {
   assert.equal(strictUsersJson.data[0].name, 'alice');
   await kernelWithStrictLayers.stop();
 
+  await fs.appendFile(path.join(projectRoot, '.env'), '\nAEGIS_LAYER_ENV_TEST=from-dotenv\n', 'utf8');
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'models.js'),
+    `class UsersModel {\n  constructor({ env }) {\n    this.env = env;\n  }\n\n  async list() {\n    return [{ id: 1, name: 'alice', modelEnv: this.env.AEGIS_LAYER_ENV_TEST || null }];\n  }\n}\n\nexport default {\n  users: UsersModel,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'services.js'),
+    `class UsersService {\n  constructor({ models, env }) {\n    this.usersModel = models.get('users');\n    this.env = env;\n  }\n\n  async list() {\n    const users = await this.usersModel.list();\n    return users.map((user) => ({ ...user, serviceEnv: this.env.AEGIS_LAYER_ENV_TEST || null }));\n  }\n}\n\nexport default {\n  users: UsersService,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'views.js'),
+    `class UsersView {\n  async index({ service, env }, req, res, next) {\n    try {\n      const data = await service.list();\n      res.json({\n        viewEnv: env.AEGIS_LAYER_ENV_TEST || null,\n        data,\n      });\n    } catch (error) {\n      next(error);\n    }\n  }\n}\n\nexport default UsersView;\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'routes.js'),
+    `export default {\n  appName: 'users',\n  register(route) {\n    route.get('/', 'users.views.index');\n  },\n};\n`,
+    'utf8',
+  );
+
+  const kernelWithInjectedEnv = await createKernel({
+    rootDir: projectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+    },
+  });
+
+  await kernelWithInjectedEnv.start();
+  const injectedEnvAddress = kernelWithInjectedEnv.context.server.address();
+  const injectedEnvPort = typeof injectedEnvAddress === 'object' && injectedEnvAddress ? injectedEnvAddress.port : 0;
+  const injectedEnvResponse = await fetch(`http://127.0.0.1:${injectedEnvPort}/users`);
+  assert.equal(injectedEnvResponse.status, 200);
+  const injectedEnvJson = await injectedEnvResponse.json();
+  assert.equal(injectedEnvJson.viewEnv, 'from-dotenv');
+  assert.equal(injectedEnvJson.data[0].serviceEnv, 'from-dotenv');
+  assert.equal(injectedEnvJson.data[0].modelEnv, 'from-dotenv');
+  await kernelWithInjectedEnv.stop();
+
   await fs.writeFile(
     path.join(projectRoot, 'apps', 'users', 'routes.js'),
     `import Models from './models.js';\n\nexport default {\n  appName: 'users',\n  register(route) {\n    route.get('/', async (req, res, next) => {\n      try {\n        const model = new Models.users({ dbClient: null });\n        const users = await model.list();\n        res.json({ users });\n      } catch (error) {\n        next(error);\n      }\n    });\n  },\n};\n`,
@@ -1209,8 +1433,28 @@ async function main() {
     'utf8',
   );
   await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'models.js'),
+    `class UsersModel {\n  constructor({ i18n }) {\n    this.i18n = i18n;\n  }\n\n  greeting(name) {\n    return this.i18n.t('home.title', { name });\n  }\n}\n\nexport default {\n  users: UsersModel,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'services.js'),
+    `class UsersService {\n  constructor({ models, i18n }) {\n    this.usersModel = models.get('users');\n    this.i18n = i18n;\n  }\n\n  greetings() {\n    return {\n      service: this.i18n.t('home.title', { name: 'Service' }),\n      model: this.usersModel.greeting('Model'),\n    };\n  }\n}\n\nexport default {\n  users: UsersService,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'validators.js'),
+    `class UsersValidator {\n  constructor({ i18n }) {\n    this.i18n = i18n;\n  }\n\n  greeting(name) {\n    return this.i18n.t('home.title', { name });\n  }\n}\n\nexport default {\n  users: UsersValidator,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'subscribers.js'),
+    `export default function registerUsersSubscribers({ appName, cache, events, i18n }) {\n  events.subscribe('app.booted', ({ appName: bootedAppName }) => {\n    if (bootedAppName !== appName) {\n      return;\n    }\n\n    cache.set('users.subscriber.greeting', i18n.t('home.title', { name: 'Subscriber' }));\n  });\n}\n`,
+    'utf8',
+  );
+  await fs.writeFile(
     path.join(projectRoot, 'routes.js'),
-    `export default {\n  register(route) {\n    route.get('/i18n/json', (req, res) => {\n      res.json({\n        locale: req.aegis.locale,\n        hello: req.aegis.t('home.title', { name: 'Aegis' }),\n      });\n    });\n\n    route.get('/', (req, res) => {\n      return res.render('home', {\n        title: req.aegis.t('home.pageTitle'),\n      });\n    });\n  },\n};\n`,
+    `export default {\n  register(route) {\n    route.get('/i18n/json', (req, res) => {\n      res.json({\n        locale: req.aegis.locale,\n        hello: req.aegis.t('home.title', { name: 'Aegis' }),\n      });\n    });\n\n    route.get('/i18n/layers', (req, res) => {\n      const usersService = req.aegis.services.forApp('users').get('users');\n      const layers = usersService.greetings();\n      res.json({\n        locale: req.aegis.locale,\n        requestHello: req.aegis.i18n.t('home.title', { name: 'Request' }),\n        serviceHello: layers.service,\n        modelHello: layers.model,\n      });\n    });\n\n    route.get('/i18n/injected', ({ cache, i18n, validators }, req, res, next) => {\n      try {\n        const usersValidator = validators.forApp('users').get('users');\n        res.json({\n          locale: req.aegis.locale,\n          viewHello: i18n.t('home.title', { name: 'View' }),\n          validatorHello: usersValidator.greeting('Validator'),\n          subscriberHello: cache.get('users.subscriber.greeting'),\n        });\n      } catch (error) {\n        next(error);\n      }\n    });\n\n    route.get('/', (req, res) => {\n      return res.render('home', {\n        title: req.aegis.t('home.pageTitle'),\n      });\n    });\n  },\n};\n`,
     'utf8',
   );
 
@@ -1225,6 +1469,9 @@ async function main() {
   await kernelWithTemplates.start();
   const templateAddress = kernelWithTemplates.context.server.address();
   const templatePort = typeof templateAddress === 'object' && templateAddress ? templateAddress.port : 0;
+  const directLayerGreetings = kernelWithTemplates.context.services.forApp('users').get('users').greetings();
+  assert.equal(directLayerGreetings.service, 'Welcome Service');
+  assert.equal(directLayerGreetings.model, 'Welcome Model');
   const templateResponse = await fetch(`http://127.0.0.1:${templatePort}/`, {
     headers: {
       'accept-language': 'fr-FR,fr;q=0.9,en;q=0.8',
@@ -1240,6 +1487,22 @@ async function main() {
   const i18nJson = await i18nJsonResponse.json();
   assert.equal(i18nJson.locale, 'fr');
   assert.equal(i18nJson.hello, 'Bienvenue Aegis');
+
+  const i18nLayerResponse = await fetch(`http://127.0.0.1:${templatePort}/i18n/layers?lang=fr`);
+  assert.equal(i18nLayerResponse.status, 200);
+  const i18nLayers = await i18nLayerResponse.json();
+  assert.equal(i18nLayers.locale, 'fr');
+  assert.equal(i18nLayers.requestHello, 'Bienvenue Request');
+  assert.equal(i18nLayers.serviceHello, 'Bienvenue Service');
+  assert.equal(i18nLayers.modelHello, 'Bienvenue Model');
+
+  const i18nInjectedResponse = await fetch(`http://127.0.0.1:${templatePort}/i18n/injected?lang=fr`);
+  assert.equal(i18nInjectedResponse.status, 200);
+  const i18nInjected = await i18nInjectedResponse.json();
+  assert.equal(i18nInjected.locale, 'fr');
+  assert.equal(i18nInjected.viewHello, 'Bienvenue View');
+  assert.equal(i18nInjected.validatorHello, 'Bienvenue Validator');
+  assert.equal(i18nInjected.subscriberHello, 'Welcome Subscriber');
   await kernelWithTemplates.stop();
 
   const kernelFromParent = await runServer({
@@ -1257,6 +1520,10 @@ async function main() {
   assert.ok(true, 'Smoke test completed');
 
   await fs.rm(sandboxRoot, { recursive: true, force: true });
+  await fs.rm(envSandboxRoot, { recursive: true, force: true });
+  await fs.rm(dotenvSandboxRoot, { recursive: true, force: true });
+  await fs.rm(httpsSandboxRoot, { recursive: true, force: true });
+  await fs.rm(proxySandboxRoot, { recursive: true, force: true });
 }
 
 main().catch((error) => {

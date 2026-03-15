@@ -3,6 +3,7 @@ import path from 'path';
 import { ensureDir, ensureValidName, exists, isDirectoryEmpty, writeFile } from '../utils/fs.js';
 import {
   renderEnvExample,
+  renderProjectEnv,
   renderProjectAppJs,
   renderProjectGitIgnore,
   renderProjectLoaderCjs,
@@ -49,9 +50,10 @@ async function createBaseProjectFiles(projectRoot, projectName) {
   await writeFile(path.join(projectRoot, 'loader.cjs'), renderProjectLoaderCjs());
   await writeFile(path.join(projectRoot, 'package.json'), renderProjectPackageJson(projectName));
   await writeFile(path.join(projectRoot, '.gitignore'), renderProjectGitIgnore());
+  await writeFile(path.join(projectRoot, '.env'), renderProjectEnv(appSecret));
   await writeFile(path.join(projectRoot, '.env.example'), renderEnvExample());
 
-  await writeFile(path.join(projectRoot, 'settings.js'), renderProjectSettings(projectName, appSecret, apps));
+  await writeFile(path.join(projectRoot, 'settings.js'), renderProjectSettings(projectName, apps));
   await writeFile(path.join(projectRoot, 'routes.js'), renderProjectRoutes());
 }
 

@@ -1,6 +1,8 @@
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import http from 'http';
+import https from 'https';
+import { AsyncLocalStorage } from 'async_hooks';
 import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -26,6 +28,7 @@ const PROJECT_ROUTE_DEFINITION = 'aegis:project-routes';
 const DEFAULT_INSTALL_TEMPLATE_PATH = fileURLToPath(new URL('./views/default-install.ejs', import.meta.url));
 const RAW_HTML_SYMBOL = Symbol('aegis:raw-html');
 const EMPTY_ROUTE_CONTEXT = Object.freeze({});
+const REQUEST_I18N_CONTEXT = new AsyncLocalStorage();
 
 function exists(filePath) {
   return fs.existsSync(filePath);
@@ -123,6 +126,68 @@ function normalizeSwaggerConfig(rawSwagger) {
       ? swagger.documentPath.trim()
       : 'openapi.json',
     explorer: swagger.explorer !== false,
+  };
+}
+
+function normalizeHttpsPathValue(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value.trim();
+}
+
+function normalizeHttpsPathList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+      .map((entry) => entry.trim());
+  }
+
+  const normalized = normalizeHttpsPathValue(value);
+  return normalized ? [normalized] : [];
+}
+
+function normalizeHttpsAssetValue(value) {
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+
+  if (Buffer.isBuffer(value) || value instanceof Uint8Array) {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeHttpsAssetList(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeHttpsAssetValue(entry))
+      .filter((entry) => entry !== null);
+  }
+
+  const normalized = normalizeHttpsAssetValue(value);
+  return normalized ? [normalized] : [];
+}
+
+function normalizeHttpsConfig(rawHttps) {
+  const httpsConfig = rawHttps === true
+    ? { enabled: true }
+    : (isPlainObject(rawHttps) ? rawHttps : {});
+
+  return {
+    enabled: httpsConfig.enabled === true,
+    key: normalizeHttpsAssetValue(httpsConfig.key),
+    cert: normalizeHttpsAssetValue(httpsConfig.cert),
+    ca: normalizeHttpsAssetList(httpsConfig.ca),
+    pfx: normalizeHttpsAssetValue(httpsConfig.pfx),
+    keyPath: normalizeHttpsPathValue(httpsConfig.keyPath),
+    certPath: normalizeHttpsPathValue(httpsConfig.certPath),
+    caPath: normalizeHttpsPathList(httpsConfig.caPath),
+    pfxPath: normalizeHttpsPathValue(httpsConfig.pfxPath),
+    passphrase: typeof httpsConfig.passphrase === 'string' ? httpsConfig.passphrase : '',
+    options: isPlainObject(httpsConfig.options) ? { ...httpsConfig.options } : {},
   };
 }
 
@@ -359,6 +424,67 @@ function resolveAppSecret(rawSecurity) {
   return secret.length >= 16 ? secret : '';
 }
 
+function generateAppSecret() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function ensureAppSecret(config, rootDir, logger) {
+  if (!isPlainObject(config.security)) {
+    config.security = {};
+  }
+
+  const configuredSecret = resolveAppSecret(config.security);
+  if (configuredSecret) {
+    config.security.appSecret = configuredSecret;
+    return configuredSecret;
+  }
+
+  const secretDirectory = path.join(rootDir || process.cwd(), '.aegis');
+  const secretFile = path.join(secretDirectory, 'app-secret');
+
+  if (exists(secretFile)) {
+    try {
+      const persistedSecret = fs.readFileSync(secretFile, 'utf8').trim();
+      if (persistedSecret.length >= 16) {
+        config.security.appSecret = persistedSecret;
+        logger.warn(
+          'security.appSecret is missing; using persisted fallback secret from %s. Prefer APP_SECRET or settings.security.appSecret.',
+          secretFile,
+        );
+        return persistedSecret;
+      }
+    } catch (error) {
+      logger.warn(
+        'security.appSecret fallback file could not be read at %s: %s',
+        secretFile,
+        error?.message || String(error),
+      );
+    }
+  }
+
+  const generatedSecret = generateAppSecret();
+  config.security.appSecret = generatedSecret;
+
+  try {
+    fs.mkdirSync(secretDirectory, { recursive: true });
+    fs.writeFileSync(secretFile, `${generatedSecret}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+    logger.warn(
+      'security.appSecret is missing; generated and persisted a fallback secret at %s. Prefer APP_SECRET or settings.security.appSecret.',
+      secretFile,
+    );
+  } catch (error) {
+    logger.warn(
+      'security.appSecret is missing; generated an in-memory fallback secret for this boot because persistence failed: %s',
+      error?.message || String(error),
+    );
+  }
+
+  return generatedSecret;
+}
+
 function signToken(token, secret) {
   return crypto.createHmac('sha256', secret).update(token).digest('hex');
 }
@@ -408,6 +534,28 @@ function normalizeTrustProxySetting(value) {
   }
 
   return false;
+}
+
+function resolveTrustProxySetting(config) {
+  const security = isPlainObject(config?.security) ? config.security : {};
+  const ddos = isPlainObject(security.ddos) ? security.ddos : {};
+  const topLevel = normalizeTrustProxySetting(config?.trustProxy);
+  if (topLevel !== false) {
+    return topLevel;
+  }
+
+  const legacy = normalizeTrustProxySetting(ddos.trustProxy);
+  return legacy !== false ? legacy : false;
+}
+
+function applyTrustProxySetting(expressApp, config, logger) {
+  const trustProxy = resolveTrustProxySetting(config);
+  config.trustProxy = trustProxy;
+  expressApp.set('trust proxy', trustProxy);
+
+  if (trustProxy !== false) {
+    logger.debug('Express trust proxy enabled: %o', trustProxy);
+  }
 }
 
 function normalizeDdosConfig(rawSecurity) {
@@ -647,6 +795,8 @@ function createLayerAccessors({ container, context }) {
         const model = instantiateLayerEntry(container.get(token), {
           appName,
           config: context.config,
+          env: context.env,
+          i18n: context.i18n,
           logger: context.logger,
           events: context.events,
           cache: context.cache,
@@ -692,6 +842,8 @@ function createLayerAccessors({ container, context }) {
         const service = instantiateLayerEntry(container.get(token), {
           appName,
           config: context.config,
+          env: context.env,
+          i18n: context.i18n,
           logger: context.logger,
           events: context.events,
           cache: context.cache,
@@ -736,6 +888,8 @@ function createLayerAccessors({ container, context }) {
         const validator = instantiateLayerEntry(container.get(token), {
           appName,
           config: context.config,
+          env: context.env,
+          i18n: context.i18n,
           logger: context.logger,
           events: context.events,
           cache: context.cache,
@@ -781,6 +935,8 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
       services: appName ? layerAccessors.servicesForApp(appName) : layerAccessors.services,
       models: appName ? layerAccessors.modelsForApp(appName) : layerAccessors.models,
       validators: appName ? layerAccessors.validatorsForApp(appName) : layerAccessors.validators,
+      env: context.env,
+      i18n: context.i18n,
       declaredAppNames: context.declaredAppNames,
     };
   }
@@ -788,6 +944,8 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
   return {
     rootDir: context.rootDir,
     config: context.config,
+    env: context.env,
+    i18n: context.i18n,
     logger: context.logger,
     events: context.events,
     cache: context.cache,
@@ -817,6 +975,7 @@ function bridgeRuntimeContextToRequest(req, runtimeContext = null, appName = nul
 
   const bindings = {
     config: runtimeContext.config,
+    env: runtimeContext.env,
     logger: runtimeContext.logger,
     events: runtimeContext.events,
     cache: runtimeContext.cache,
@@ -885,6 +1044,8 @@ function buildHandlerContext(req, runtimeContext = null, currentApp = null) {
         }
       : null),
     config: aegis.config ?? runtimeContext?.config ?? null,
+    env: aegis.env ?? runtimeContext?.env ?? null,
+    i18n: aegis.i18n ?? runtimeContext?.i18n ?? null,
     logger: aegis.logger ?? runtimeContext?.logger ?? null,
     events: aegis.events ?? runtimeContext?.events ?? null,
     cache: aegis.cache ?? runtimeContext?.cache ?? null,
@@ -1336,6 +1497,94 @@ function createTranslator(i18nConfig, resolveActiveLocale) {
   };
 }
 
+function createI18nBridge(i18nConfig, {
+  resolveLocale = null,
+  resolveLocaleSource = null,
+  setLocale = null,
+} = {}) {
+  const getActiveLocale = () => resolveSupportedLocale(
+    typeof resolveLocale === 'function' ? resolveLocale() : i18nConfig.defaultLocale,
+    i18nConfig.supported,
+    i18nConfig.defaultLocale,
+  );
+
+  const bridge = {
+    enabled: i18nConfig.enabled,
+    defaultLocale: i18nConfig.defaultLocale,
+    fallbackLocale: i18nConfig.fallbackLocale,
+    supported: [...i18nConfig.supported],
+    queryParam: i18nConfig.queryParam,
+    cookieName: i18nConfig.cookieName,
+    resolveLocale(locale) {
+      return resolveSupportedLocale(locale, i18nConfig.supported, i18nConfig.defaultLocale);
+    },
+    t: createTranslator(i18nConfig, getActiveLocale),
+    forLocale(locale) {
+      const resolvedLocale = resolveSupportedLocale(
+        locale,
+        i18nConfig.supported,
+        i18nConfig.defaultLocale,
+      );
+
+      return createI18nBridge(i18nConfig, {
+        resolveLocale: () => resolvedLocale,
+      });
+    },
+  };
+
+  Object.defineProperty(bridge, 'locale', {
+    enumerable: true,
+    get: () => getActiveLocale(),
+  });
+
+  Object.defineProperty(bridge, 'localeSource', {
+    enumerable: true,
+    get: () => {
+      if (typeof resolveLocaleSource !== 'function') {
+        return undefined;
+      }
+
+      const source = resolveLocaleSource();
+      return typeof source === 'string' && source.trim().length > 0 ? source : undefined;
+    },
+  });
+
+  if (typeof setLocale === 'function') {
+    bridge.setLocale = (nextLocale, options = {}) => setLocale(nextLocale, options);
+  }
+
+  return bridge;
+}
+
+function createRuntimeI18n(i18nConfig) {
+  return createI18nBridge(i18nConfig, {
+    resolveLocale: () => REQUEST_I18N_CONTEXT.getStore()?.locale || i18nConfig.defaultLocale,
+    resolveLocaleSource: () => REQUEST_I18N_CONTEXT.getStore()?.source || 'default',
+    setLocale: (nextLocale, options = {}) => {
+      const store = REQUEST_I18N_CONTEXT.getStore();
+      if (store && typeof store.setLocale === 'function') {
+        return store.setLocale(nextLocale, options);
+      }
+
+      return resolveSupportedLocale(nextLocale, i18nConfig.supported, i18nConfig.defaultLocale);
+    },
+  });
+}
+
+function createRequestI18n(i18nConfig, req) {
+  return createI18nBridge(i18nConfig, {
+    resolveLocale: () => req?.aegis?.locale,
+    resolveLocaleSource: () => req?.aegis?.localeSource,
+    setLocale: (nextLocale, options = {}) => {
+      if (typeof req?.aegis?.setLocale === 'function') {
+        return req.aegis.setLocale(nextLocale, options);
+      }
+
+      return resolveSupportedLocale(nextLocale, i18nConfig.supported, i18nConfig.defaultLocale);
+    },
+  });
+}
+
 
 function isSafeHttpMethod(method) {
   const upper = String(method || '').toUpperCase();
@@ -1396,6 +1645,107 @@ function resolveSecureCookieFlag(req, secureSetting) {
 
   // req.secure respects Express trust proxy settings and avoids trusting spoofed headers by default.
   return Boolean(req.secure);
+}
+
+function resolveHttpsAssetPath(rootDir, filePath, label) {
+  const normalizedPath = normalizeHttpsPathValue(filePath);
+  if (!normalizedPath) {
+    return '';
+  }
+
+  const resolvedPath = path.isAbsolute(normalizedPath)
+    ? normalizedPath
+    : path.join(rootDir, normalizedPath);
+
+  if (!exists(resolvedPath)) {
+    throw new Error(`HTTPS ${label} file not found: ${resolvedPath}`);
+  }
+
+  return resolvedPath;
+}
+
+function readHttpsAssetFile(rootDir, filePath, label) {
+  const resolvedPath = resolveHttpsAssetPath(rootDir, filePath, label);
+  if (!resolvedPath) {
+    return null;
+  }
+
+  try {
+    return fs.readFileSync(resolvedPath);
+  } catch (error) {
+    throw new Error(`HTTPS ${label} file could not be read at ${resolvedPath}: ${error?.message || String(error)}`);
+  }
+}
+
+function resolveHttpsAsset(rootDir, directValue, filePath, label) {
+  const normalizedDirectValue = normalizeHttpsAssetValue(directValue);
+  if (normalizedDirectValue) {
+    return normalizedDirectValue;
+  }
+
+  return readHttpsAssetFile(rootDir, filePath, label);
+}
+
+function resolveHttpsAssetList(rootDir, directValue, filePath, label) {
+  const directList = normalizeHttpsAssetList(directValue);
+  if (directList.length > 0) {
+    return directList;
+  }
+
+  const filePaths = normalizeHttpsPathList(filePath);
+  if (filePaths.length === 0) {
+    return [];
+  }
+
+  return filePaths.map((entry, index) => readHttpsAssetFile(rootDir, entry, `${label}[${index}]`));
+}
+
+function resolveServerProtocol(config) {
+  return config?.https?.enabled === true ? 'https' : 'http';
+}
+
+function createHttpServer(expressApp, config) {
+  const httpsConfig = normalizeHttpsConfig(config.https);
+  config.https = httpsConfig;
+
+  if (!httpsConfig.enabled) {
+    return {
+      server: http.createServer(expressApp),
+      protocol: 'http',
+    };
+  }
+
+  const rootDir = config.rootDir || process.cwd();
+  const options = { ...httpsConfig.options };
+  const pfx = resolveHttpsAsset(rootDir, httpsConfig.pfx, httpsConfig.pfxPath, 'pfx');
+  const key = resolveHttpsAsset(rootDir, httpsConfig.key, httpsConfig.keyPath, 'key');
+  const cert = resolveHttpsAsset(rootDir, httpsConfig.cert, httpsConfig.certPath, 'cert');
+  const ca = resolveHttpsAssetList(rootDir, httpsConfig.ca, httpsConfig.caPath, 'ca');
+
+  if (!pfx && (!key || !cert)) {
+    throw new Error('HTTPS requires either https.pfx/pfxPath or both https.key/keyPath and https.cert/certPath.');
+  }
+
+  if (pfx) {
+    options.pfx = pfx;
+  }
+  if (key) {
+    options.key = key;
+  }
+  if (cert) {
+    options.cert = cert;
+  }
+  if (ca.length > 0) {
+    options.ca = ca.length === 1 ? ca[0] : ca;
+  }
+  if (httpsConfig.passphrase) {
+    options.passphrase = httpsConfig.passphrase;
+  }
+
+  return {
+    server: https.createServer(options, expressApp),
+    protocol: 'https',
+  };
 }
 
 function extractCsrfToken(req, csrfConfig) {
@@ -1462,6 +1812,8 @@ function buildControllerDependencies({ appName, runtimeContext = null, container
     appName,
     rootDir: runtimeContext?.rootDir,
     config: runtimeContext?.config,
+    env: runtimeContext?.env,
+    i18n: runtimeContext?.i18n,
     logger: runtimeContext?.logger,
     events: runtimeContext?.events,
     cache: runtimeContext?.cache,
@@ -1719,6 +2071,7 @@ function createRouteApi(router, resolveRef, currentApp, options = {}) {
 function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
   const helperSet = isPlainObject(runtimeContext?.helpers) ? runtimeContext.helpers : {};
   const jliveBridge = runtimeContext?.jlive || null;
+  const runtimeEnv = isPlainObject(runtimeContext?.env) ? runtimeContext.env : {};
   const authManager = runtimeContext?.auth || null;
   const uploadManager = runtimeContext?.upload || null;
   const services = runtimeContext?.services || null;
@@ -1742,122 +2095,144 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
   }
 
   expressApp.use((req, res, next) => {
-    req.aegis = req.aegis || {};
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'helpers')) {
-      req.aegis.helpers = helperSet;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'jlive')) {
-      req.aegis.jlive = jliveBridge;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'auth')) {
-      req.aegis.auth = authManager;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'upload')) {
-      req.aegis.upload = uploadManager;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'services')) {
-      req.aegis.services = services;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'models')) {
-      req.aegis.models = models;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'validators')) {
-      req.aegis.validators = validators;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'cache')) {
-      req.aegis.cache = cache;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'events')) {
-      req.aegis.events = events;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'config')) {
-      req.aegis.config = config;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'logger')) {
-      req.aegis.logger = logger;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'io')) {
-      req.aegis.io = io;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'database')) {
-      req.aegis.database = database;
-    }
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'dbClient')) {
-      req.aegis.dbClient = dbClient;
-    }
+    REQUEST_I18N_CONTEXT.run({}, () => {
+      const requestI18nContext = REQUEST_I18N_CONTEXT.getStore();
+      const syncRequestI18nContext = (fallbackSource = 'default') => {
+        if (!requestI18nContext) {
+          return;
+        }
 
-    const localeResolution = i18nConfig.enabled
-      ? resolveRequestLocale(req, i18nConfig)
-      : {
-          locale: i18nConfig.defaultLocale,
-          source: 'disabled',
-        };
-
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'locale')) {
-      req.aegis.locale = localeResolution.locale;
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'localeSource')) {
-      req.aegis.localeSource = localeResolution.source;
-    }
-
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'setLocale')) {
-      req.aegis.setLocale = (nextLocale, options = {}) => {
-        const safeOptions = isPlainObject(options) ? options : {};
-        const resolvedLocale = resolveSupportedLocale(
-          nextLocale,
+        requestI18nContext.locale = resolveSupportedLocale(
+          req.aegis?.locale,
           i18nConfig.supported,
           i18nConfig.defaultLocale,
         );
-
-        req.aegis.locale = resolvedLocale;
-        req.aegis.localeSource = 'manual';
-
-        const shouldPersist = safeOptions.persist !== false;
-        if (shouldPersist && i18nConfig.cookieName && typeof res.cookie === 'function') {
-          res.cookie(i18nConfig.cookieName, resolvedLocale, {
-            path: '/',
-            sameSite: 'lax',
-            httpOnly: false,
-          });
-        }
-
-        return req.aegis.locale;
+        requestI18nContext.source = typeof req.aegis?.localeSource === 'string' && req.aegis.localeSource.trim().length > 0
+          ? req.aegis.localeSource
+          : fallbackSource;
+        requestI18nContext.setLocale = typeof req.aegis?.setLocale === 'function'
+          ? req.aegis.setLocale
+          : null;
       };
-    }
 
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 't')) {
-      req.aegis.t = createTranslator(
-        i18nConfig,
-        () => resolveSupportedLocale(req.aegis.locale, i18nConfig.supported, i18nConfig.defaultLocale),
-      );
-    }
+      req.aegis = req.aegis || {};
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'helpers')) {
+        req.aegis.helpers = helperSet;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'jlive')) {
+        req.aegis.jlive = jliveBridge;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'env')) {
+        req.aegis.env = runtimeEnv;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'auth')) {
+        req.aegis.auth = authManager;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'upload')) {
+        req.aegis.upload = uploadManager;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'services')) {
+        req.aegis.services = services;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'models')) {
+        req.aegis.models = models;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'validators')) {
+        req.aegis.validators = validators;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'cache')) {
+        req.aegis.cache = cache;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'events')) {
+        req.aegis.events = events;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'config')) {
+        req.aegis.config = config;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'logger')) {
+        req.aegis.logger = logger;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'io')) {
+        req.aegis.io = io;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'database')) {
+        req.aegis.database = database;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'dbClient')) {
+        req.aegis.dbClient = dbClient;
+      }
 
-    if (!Object.prototype.hasOwnProperty.call(req.aegis, 'i18n')) {
-      req.aegis.i18n = {
-        enabled: i18nConfig.enabled,
-        defaultLocale: i18nConfig.defaultLocale,
-        fallbackLocale: i18nConfig.fallbackLocale,
-        supported: [...i18nConfig.supported],
-        queryParam: i18nConfig.queryParam,
-        cookieName: i18nConfig.cookieName,
-      };
-    }
+      const localeResolution = i18nConfig.enabled
+        ? resolveRequestLocale(req, i18nConfig)
+        : {
+            locale: i18nConfig.defaultLocale,
+            source: 'disabled',
+          };
 
-    if (
-      i18nConfig.enabled
-      && localeResolution.source === 'query'
-      && i18nConfig.cookieName
-      && typeof res.cookie === 'function'
-    ) {
-      res.cookie(i18nConfig.cookieName, localeResolution.locale, {
-        path: '/',
-        sameSite: 'lax',
-        httpOnly: false,
-      });
-    }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'locale')) {
+        req.aegis.locale = localeResolution.locale;
+      }
 
-    next();
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'localeSource')) {
+        req.aegis.localeSource = localeResolution.source;
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'setLocale')) {
+        req.aegis.setLocale = (nextLocale, options = {}) => {
+          const safeOptions = isPlainObject(options) ? options : {};
+          const resolvedLocale = resolveSupportedLocale(
+            nextLocale,
+            i18nConfig.supported,
+            i18nConfig.defaultLocale,
+          );
+
+          req.aegis.locale = resolvedLocale;
+          req.aegis.localeSource = 'manual';
+
+          const shouldPersist = safeOptions.persist !== false;
+          if (shouldPersist && i18nConfig.cookieName && typeof res.cookie === 'function') {
+            res.cookie(i18nConfig.cookieName, resolvedLocale, {
+              path: '/',
+              sameSite: 'lax',
+              httpOnly: false,
+            });
+          }
+
+          syncRequestI18nContext('manual');
+          return req.aegis.locale;
+        };
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'i18n')) {
+        req.aegis.i18n = createRequestI18n(i18nConfig, req);
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 't')) {
+        req.aegis.t = typeof req.aegis.i18n?.t === 'function'
+          ? req.aegis.i18n.t
+          : createTranslator(
+              i18nConfig,
+              () => resolveSupportedLocale(req.aegis.locale, i18nConfig.supported, i18nConfig.defaultLocale),
+            );
+      }
+
+      syncRequestI18nContext(localeResolution.source);
+
+      if (
+        i18nConfig.enabled
+        && localeResolution.source === 'query'
+        && i18nConfig.cookieName
+        && typeof res.cookie === 'function'
+      ) {
+        res.cookie(i18nConfig.cookieName, localeResolution.locale, {
+          path: '/',
+          sameSite: 'lax',
+          httpOnly: false,
+        });
+      }
+
+      next();
+    });
   });
 }
 
@@ -2219,6 +2594,7 @@ function attachTemplateHelpers(expressApp, templateConfig, logger, runtimeHelper
 
   const helperSet = isPlainObject(runtimeHelpers?.helpers) ? runtimeHelpers.helpers : {};
   const jliveBridge = runtimeHelpers?.jlive || null;
+  const runtimeEnv = isPlainObject(runtimeHelpers?.env) ? runtimeHelpers.env : {};
   const customLocalsSource = templateConfig?.locals;
 
   expressApp.use((req, res, next) => {
@@ -2230,6 +2606,7 @@ function attachTemplateHelpers(expressApp, templateConfig, logger, runtimeHelper
           res,
           helpers: helperSet,
           jlive: jliveBridge,
+          env: runtimeEnv,
         });
         customLocals = isPlainObject(computed) ? computed : {};
       } else if (isPlainObject(customLocalsSource)) {
@@ -2251,6 +2628,9 @@ function attachTemplateHelpers(expressApp, templateConfig, logger, runtimeHelper
 
     if (!Object.prototype.hasOwnProperty.call(res.locals, 'locale') && typeof req.aegis?.locale === 'string') {
       res.locals.locale = req.aegis.locale;
+    }
+    if (!Object.prototype.hasOwnProperty.call(res.locals, 'i18n') && req.aegis?.i18n) {
+      res.locals.i18n = req.aegis.i18n;
     }
     if (!Object.prototype.hasOwnProperty.call(res.locals, 't') && typeof req.aegis?.t === 'function') {
       res.locals.t = req.aegis.t;
@@ -2388,6 +2768,8 @@ function attachTemplateHelpers(expressApp, templateConfig, logger, runtimeHelper
 function buildContext({
   rootDir,
   config,
+  env = {},
+  i18n = null,
   logger,
   container,
   events,
@@ -2401,10 +2783,13 @@ function buildContext({
   helpers = {},
   jlive = null,
   upload = null,
+  protocol = 'http',
 }) {
   return {
     rootDir,
     config,
+    env,
+    i18n,
     logger,
     container,
     events,
@@ -2419,6 +2804,7 @@ function buildContext({
     helpers,
     jlive,
     upload,
+    protocol,
     declaredAppNames: new Set(),
   };
 }
@@ -2476,10 +2862,6 @@ function attachDdosProtection(expressApp, config, logger) {
   if (!ddosConfig.enabled) {
     logger.info('DDoS rate limiter disabled by configuration.');
     return;
-  }
-
-  if (ddosConfig.trustProxy !== false) {
-    expressApp.set('trust proxy', ddosConfig.trustProxy);
   }
 
   const limiter = rateLimit({
@@ -2681,6 +3063,7 @@ function attachOAuth2AuthorizationServer(expressApp, auth, logger) {
 }
 
 function buildDefaultSwaggerDocument(config) {
+  const protocol = resolveServerProtocol(config);
   return {
     openapi: '3.0.3',
     info: {
@@ -2690,7 +3073,7 @@ function buildDefaultSwaggerDocument(config) {
     },
     servers: [
       {
-        url: `http://${config.host || '0.0.0.0'}:${config.port || 3000}`,
+        url: `${protocol}://${config.host || '0.0.0.0'}:${config.port || 3000}`,
       },
     ],
     paths: {},
@@ -2784,28 +3167,37 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   const loadedConfig = await loadProjectConfig(rootDir);
   const config = deepMerge(loadedConfig, overrides || {});
   config.rootDir = rootDir;
+  const logger = createLogger({ level: config.logging?.level, name: config.appName || 'aegisnode' });
+  const resolvedAppSecret = ensureAppSecret(config, rootDir, logger);
   config.apps = normalizeApps(config.apps || []);
   config.api = normalizeApiConfig(config.api, config.apps);
   config.auth = normalizeAuthConfig(config.auth, {
     appName: config.appName || path.basename(rootDir),
-    appSecret: config.security?.appSecret,
+    appSecret: resolvedAppSecret,
   });
   config.swagger = normalizeSwaggerConfig(config.swagger);
   config.architecture = normalizeArchitectureConfig(config.architecture);
   config.uploads = normalizeUploadsConfig(config.uploads, rootDir);
 
-  const logger = createLogger({ level: config.logging?.level, name: config.appName || 'aegisnode' });
+  const runtimeEnv = Object.freeze({
+    ...process.env,
+    APP_SECRET: process.env.APP_SECRET || config.security?.appSecret || '',
+  });
   const defaultInstallTemplate = await loadDefaultInstallTemplate(logger);
   const runtimeHelpers = await createRuntimeHelpers({ logger, config });
+  const i18nConfig = normalizeI18nConfig(config.i18n, rootDir, logger);
+  config.i18n = i18nConfig;
+  const runtimeI18n = createRuntimeI18n(i18nConfig);
   const upload = await createUploadManager(config.uploads, logger);
   const container = createContainer();
   const events = createEventBus();
   const expressApp = express();
   const templateConfig = configureTemplateEngine(expressApp, config, rootDir, logger);
+  applyTrustProxySetting(expressApp, config, logger);
   const websocketCorsConfig = Object.prototype.hasOwnProperty.call(config.websocket || {}, 'cors')
     ? config.websocket.cors
     : { origin: false };
-  const server = http.createServer(expressApp);
+  const { server, protocol: serverProtocol } = createHttpServer(expressApp, config);
   const io = config.websocket?.enabled === false
     ? null
     : new SocketIOServer(server, {
@@ -2826,10 +3218,12 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   }
 
   container.set('config', config);
+  container.set('env', runtimeEnv);
   container.set('logger', logger);
   container.set('events', events);
   container.set('app', expressApp);
   container.set('server', server);
+  container.set('protocol', serverProtocol);
   container.set('io', io);
   container.set('database', database);
   container.set('dbClient', database?.client ?? null);
@@ -2838,11 +3232,14 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   container.set('templates', templateConfig);
   container.set('helpers', runtimeHelpers.helpers);
   container.set('jlive', runtimeHelpers.jlive);
+  container.set('i18n', runtimeI18n);
   container.set('upload', upload);
 
   const context = buildContext({
     rootDir,
     config,
+    env: runtimeEnv,
+    i18n: runtimeI18n,
     logger,
     container,
     events,
@@ -2856,6 +3253,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
     helpers: runtimeHelpers.helpers,
     jlive: runtimeHelpers.jlive,
     upload,
+    protocol: serverProtocol,
   });
   const layerAccessors = createLayerAccessors({ container, context });
   context.services = layerAccessors.services;
@@ -2900,7 +3298,10 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   attachOAuth2AuthorizationServer(expressApp, auth, logger);
   attachCsrfProtection(expressApp, config, logger, auth);
   await attachSwaggerMiddlewares(expressApp, config, rootDir, logger);
-  attachTemplateHelpers(expressApp, templateConfig, logger, runtimeHelpers);
+  attachTemplateHelpers(expressApp, templateConfig, logger, {
+    ...runtimeHelpers,
+    env: runtimeEnv,
+  });
   attachSocketLifecycle(io, events);
 
   for (const appDefinition of declaredApps) {
@@ -3044,7 +3445,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
 
       server.listen(config.port, config.host, () => {
         started = true;
-        logger.info('AegisNode server running at http://%s:%s', config.host, config.port);
+        logger.info('AegisNode server running at %s://%s:%s', serverProtocol, config.host, config.port);
         resolve();
       });
 

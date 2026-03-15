@@ -24,8 +24,17 @@ AegisNode is a modular, view-first Node.js framework starter with:
 - EJS templates configurable in `settings.js` with Django-style base layout flow
 - Built-in runtime helpers (`money`, `number`, `dateTime`, `timeElapsed`, `toObjectId`) + `jlive` bridge
 
-`startproject` creates `app.js`, `loader.cjs`, `settings.js`, and `routes.js` without creating any default app.
+`startproject` creates `app.js`, `loader.cjs`, `.env`, `settings.js`, and `routes.js` without creating any default app.
 It does not create `public/` or `logs/`; create your own folders and set them in `settings.js`.
+
+Environment files are loaded automatically before `settings.js` is imported.
+Supported files:
+- `.env`
+- `.env.local`
+- `.env.<NODE_ENV>`
+- `.env.<NODE_ENV>.local`
+
+Shell or hosting-panel environment variables win over values from `.env` files.
 
 ## CLI
 
@@ -59,6 +68,10 @@ Passenger setup (Apache/Nginx/Plesk/cPanel/etc.):
 5. Restart the Node app from your hosting panel/service.
 
 Plesk note: these map to **Application Root** and **Application Startup File** fields.
+
+HTTPS note:
+- If TLS is terminated by Passenger/Apache/Nginx, keep `https.enabled` off and set top-level `trustProxy` to `1` (or another exact proxy-hop/subnet value) so `req.secure`, secure cookies, and OAuth2 HTTPS checks work correctly.
+- Only enable `https` in `settings.js` when Node itself should serve TLS directly.
 
 How it works:
 - `loader.cjs` imports `app.js`.
@@ -109,6 +122,19 @@ aegisnode doctor
 
 `startproject` generates a minimal `settings.js` and runtime defaults fill the rest.
 
+Access environment values anywhere with `process.env`:
+
+```js
+export default {
+  port: process.env.PORT ? Number(process.env.PORT) : 3000,
+  security: {
+    appSecret: process.env.APP_SECRET || '',
+  },
+};
+```
+
+Injected app layers also receive `env`, so views/services/models/subscribers can use `env.MY_NAME` without importing `process.env`.
+
 `settings.js` (generated shape):
 
 ```js
@@ -117,8 +143,9 @@ export default {
   env: process.env.NODE_ENV || 'development',
   host: process.env.HOST || '0.0.0.0',
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
+  trustProxy: false,
   security: {
-    appSecret: 'replace-with-strong-secret',
+    appSecret: process.env.APP_SECRET || '',
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
@@ -143,7 +170,8 @@ export default {
 
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
-- Add optional blocks manually only when needed: `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- `startproject` also writes a local `.env` with a generated `APP_SECRET`.
+- Add optional blocks manually only when needed: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
 <!-- SETTINGS_REFERENCE_START -->
@@ -169,9 +197,11 @@ Merge order used at startup:
 | `env` | `string` / `process.env.NODE_ENV || 'development'` | Active environment key for `environments` overrides. |
 | `host` | `string` / `process.env.HOST || '0.0.0.0'` | Bind host for HTTP server. |
 | `port` | `number` / `process.env.PORT || 3000` | Bind port for HTTP server. |
+| `trustProxy` | `boolean \| number \| string` / `false` | Express `trust proxy` value. Set this when HTTPS is terminated by a reverse proxy/load balancer. |
+| `https` | `object \| false` / see HTTPS table | Direct TLS server settings for Node-hosted HTTPS. |
 | `staticDir` | `string \| null` / `null` | Static assets directory, relative to project root (if set). |
 | `templates` | `object \| false` / see templates table | EJS template engine + layout settings. |
-| `i18n` | `object` / see i18n table | Built-in locale detection + request translator (`req.aegis.t`). |
+| `i18n` | `object` / see i18n table | Built-in locale detection + translator bridge (`req.aegis.t`, injected `i18n.t`). |
 | `helpers` | `object` / see helpers table | Runtime helper defaults (for example currency/locale for `helpers.money`). |
 | `security` | `object` / see security tables | Security headers, DDoS limiter, CSRF settings, app secret. |
 | `logging` | `object` / `{ level: 'info' }` | Runtime logger level. |
@@ -192,6 +222,57 @@ Notes:
 - `rootDir` is internal and set by runtime; do not manage it manually.
 - Arrays are replaced (not merged) during deep merge.
 
+### HTTPS (`https`)
+
+Use this only when Node should serve HTTPS directly. If HTTPS is handled by Passenger, Nginx, Apache, or another proxy, keep `https.enabled` off and set top-level `trustProxy` instead.
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Create an HTTPS server instead of HTTP. |
+| `key` | `string \| Buffer` / `null` | TLS private key content. |
+| `cert` | `string \| Buffer` / `null` | TLS certificate content. |
+| `ca` | `string \| Buffer \| array` / `null` | Optional CA/intermediate certificate content. |
+| `pfx` | `string \| Buffer` / `null` | PFX/PKCS#12 archive content. Use instead of `key` + `cert`. |
+| `keyPath` | `string` / `''` | Path to TLS private key, relative to project root or absolute. |
+| `certPath` | `string` / `''` | Path to TLS certificate, relative to project root or absolute. |
+| `caPath` | `string \| string[]` / `null` | Optional CA/intermediate certificate path(s). |
+| `pfxPath` | `string` / `''` | Path to PFX/PKCS#12 archive. |
+| `passphrase` | `string` / `''` | Optional passphrase for encrypted key/PFX files. |
+| `options` | `object` / `{}` | Extra Node `https.createServer` options (for example `minVersion`). |
+
+Direct HTTPS example:
+
+```js
+export default {
+  host: '0.0.0.0',
+  port: 3443,
+  https: {
+    enabled: true,
+    keyPath: 'certs/localhost-key.pem',
+    certPath: 'certs/localhost-cert.pem',
+    options: {
+      minVersion: 'TLSv1.2',
+    },
+  },
+};
+```
+
+Reverse-proxy HTTPS example:
+
+```js
+export default {
+  host: '127.0.0.1',
+  port: 3000,
+  trustProxy: 1,
+};
+```
+
+Notes:
+- `https` requires either `pfx`/`pfxPath` or both `key`/`keyPath` and `cert`/`certPath`.
+- Paths resolve from project root unless absolute.
+- `trustProxy` affects `req.secure`, `req.protocol`, secure cookies, and OAuth2 secure transport checks.
+- Prefer `1`, a subnet, or another exact Express `trust proxy` value instead of `true` when rate limiting is enabled.
+
 ### Templates (`templates`)
 
 | Key | Type / Default | Description |
@@ -201,7 +282,7 @@ Notes:
 | `dir` | `string` / `'templates'` | Templates folder (absolute or relative to project root). |
 | `base` | `string \| false \| null` / `'base'` | Default layout template (without `.ejs`). Set `false`/`null` to disable layout wrapping globally. |
 | `appBases` | `object` / `{}` | Per-app layout override map: `{ appName: 'layout/name' }`. Set app value to `false`/`null` to disable layout for that app only. |
-| `locals` | `object \| function` / `{}` | Global locals. If function, signature is `({ req, res, helpers, jlive }) => object`. |
+| `locals` | `object \| function` / `{}` | Global locals. If function, signature is `({ req, res, helpers, jlive, env }) => object`. |
 
 Layout notes:
 - `res.render('view', data)` renders `view.ejs` and wraps it with `base.ejs` (or configured layout).
@@ -230,6 +311,8 @@ i18n notes:
 - Use dotted keys like `home.title`.
 - Placeholder interpolation supports `{name}` style tokens.
 - Relative JSON paths resolve from project root (`settings.js` location).
+- Injected `i18n` is available in handlers, services, models, controllers, and subscribers. Use `i18n.t('key', vars, { locale })`.
+- During a request, injected `i18n.t(...)` follows the active request locale. Outside a request, it falls back to `defaultLocale`.
 
 ### Helpers Defaults (`helpers`)
 
@@ -327,7 +410,7 @@ security: {
 | `legacyHeaders` | `boolean` / `false` | Emit legacy `X-RateLimit-*` headers. |
 | `skipSuccessfulRequests` | `boolean` / `false` | Do not count successful responses. |
 | `skipFailedRequests` | `boolean` / `false` | Do not count failed responses. |
-| `trustProxy` | `boolean \| number \| string` / `false` | Express `trust proxy` value used for limiter IP resolution. |
+| `trustProxy` | `boolean \| number \| string` / `false` | Legacy alias for top-level `trustProxy`. Still supported for backward compatibility. |
 | `store` | `object \| null` / `null` | Custom rate-limit store implementation. |
 | `skipPaths` | `string[]` / `['/health']` | Path prefixes excluded from limiter. |
 
@@ -597,13 +680,63 @@ Usage by file:
 - `routes.js`: route mapping only (`route.get(...)`, `route.post(...)`, `route.use(...)`) to view handlers.
 
 Route modules are mapping-only (`register(route)`).
-Framework context is injected into handlers as first argument (when handler uses 4 args): `{ service, validator, services, models, validators, auth, helpers, events, ... }`.
+Framework context is injected into handlers as first argument (when handler uses 4 args): `{ service, validator, services, models, validators, auth, helpers, i18n, events, ... }`.
 `req.aegis` is also available.
 `service`/`validator` are app-scoped conveniences. For root/non-app routes, use `services.get('<app>')` and `validators.get('<app>')`.
 
 What “app-scoped” means:
 - In app routes (for example inside `apps/users/routes.js`), `{ service }` resolves to that app service.
 - In root/global routes (`routes.js`), there is no single app context, so use `{ services }` and fetch by name.
+
+Injected runtime dependencies:
+
+AegisNode injects resolved runtime objects instead of asking app layers to import framework internals. `config` is the resolved runtime config from `settings.js` plus defaults and runtime overrides.
+
+Available by layer:
+- Views/handlers (`views.js` or any context-first route/controller action): `appName`, `app`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `service`, `model`, `validator`, `database`, `dbClient`
+- Services (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `models`, `validators`, `services`
+- Models (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `helpers`, `jlive`, `dbClient`, `database`
+- Validators (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `dbClient`, `database`
+- Subscribers (`export default function ({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`
+- Controllers (`constructor({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `container`, `app`
+- Request bridge (`req.aegis`): `config`, `env`, `i18n`, `locale`, `localeSource`, `t`, `setLocale`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `appName`, `app`
+- Template locals: `helpers`, `jlive`, `t`, `locale`, `i18n`, `money`, `number`, `dateTime`, `timeElapsed`, `timeDifference`, `breakStr`
+
+Key meanings:
+
+| Key | Description |
+| --- | --- |
+| `config` | Resolved runtime config from `settings.js`, framework defaults, environment overrides, and runtime overrides. |
+| `env` | Frozen environment snapshot (`process.env` plus runtime additions such as `APP_SECRET`). |
+| `i18n` | Translator bridge. During a request it follows the active request locale; outside a request it falls back to `defaultLocale` unless you pass `{ locale }`. |
+| `logger` | Runtime logger instance. |
+| `events` | Event bus used by subscribers and app code. |
+| `cache` | Cache backend instance (memory by default). |
+| `io` | Socket.IO server instance when websocket support is enabled. |
+| `auth` | Auth manager for JWT/OAuth2 flows. |
+| `helpers` | Runtime helper functions such as `money`, `number`, `dateTime`, and `timeElapsed`. |
+| `jlive` | jlive bridge instance. |
+| `upload` | Upload manager used by `route.upload`. |
+| `services` | Layer accessor used to fetch services by app/name. |
+| `models` | Layer accessor used to fetch models by app/name. |
+| `validators` | Layer accessor used to fetch validators by app/name. |
+| `service` | App-scoped convenience service for the current app only. |
+| `model` | App-scoped convenience model for the current app only. |
+| `validator` | App-scoped convenience validator for the current app only. |
+| `database` | Database runtime wrapper. |
+| `dbClient` | Low-level database/query client. |
+| `appName` | Current app name. |
+| `app` | Current app metadata/context. |
+| `rootDir` | Absolute project root. |
+| `server` | HTTP/HTTPS server instance. |
+| `templates` | Resolved template-engine configuration. |
+| `protocol` | Server protocol (`http` or `https`). |
+| `container` | Internal DI container. |
+| `declaredAppNames` | Set of apps declared in config/routes. |
+| `locale` | Active request locale. Available on `req.aegis` and template locals. |
+| `localeSource` | Where the current locale came from (`query`, `cookie`, `header`, `manual`, or `disabled`). |
+| `t` | Convenience translator shortcut for the current request/template scope. |
+| `setLocale` | Request helper used to change and optionally persist the active locale. |
 
 ```js
 // routes.js (root/global)
@@ -690,8 +823,9 @@ Example `services.js`:
 
 ```js
 class UsersService {
-  constructor({ models }) {
+  constructor({ models, env }) {
     this.usersModel = models.get('users');
+    this.env = env;
   }
 
   async listUsers() {
@@ -715,6 +849,12 @@ export default function registerUsersSubscribers({ events, logger }) {
   });
 }
 ```
+
+Injected `env` is also available in:
+- view handler context: `static index({ env }, req, res) { ... }`
+- model constructors: `constructor({ dbClient, env }) { ... }`
+- subscribers: `export default function ({ events, env }) { ... }`
+- request runtime bridge: `req.aegis.env`
 
 Example `routes.js`:
 
@@ -1415,6 +1555,36 @@ route.get('/i18n-demo', (req, res) => {
 });
 ```
 
+Choosing the API:
+
+- `req.aegis.t('home.title')`
+  Shortcut for `req.aegis.i18n.t('home.title')`. Use this in routes/views when you only need a translated string.
+- `req.aegis.i18n`
+  Request-scoped i18n object. Use this when you also need locale metadata or helpers such as `locale`, `localeSource`, `setLocale(...)`, `resolveLocale(...)`, or `forLocale(...)`.
+- Injected `i18n` in handlers/services/models/controllers/subscribers
+  Runtime-injected i18n bridge. During an HTTP request, `i18n.t(...)` resolves with the same active locale as `req.aegis.i18n.t(...)`, so the translation result is the same.
+
+Important differences:
+
+- `req.aegis.t` and `req.aegis.i18n.t` return the same translation for the current request.
+- Injected `i18n.t(...)` in a service/model is not the same object as `req.aegis.i18n`, but during a request it produces the same translation result for the same key/options.
+- Outside a request, injected `i18n.t(...)` falls back to `defaultLocale`.
+- In background jobs, loaders, or boot-time code, pass an explicit locale when needed: `i18n.t('home.title', { name: 'Jason' }, { locale: 'fr' })`.
+
+Service/model usage:
+
+```js
+class UsersService {
+  constructor({ i18n }) {
+    this.i18n = i18n;
+  }
+
+  greeting(name) {
+    return this.i18n.t('home.title', { name });
+  }
+}
+```
+
 Template usage:
 
 ```ejs
@@ -1460,15 +1630,16 @@ Notes:
 - `defaultLocale` is used only when user has no saved locale.
 - After selection, cookie locale becomes the default for that user on next requests.
 - `?lang=fr` also persists automatically when `detectFromQuery` is enabled.
+- Templates get `t`, `locale`, and `i18n` in locals.
 
 ## Helpers And jlive
 
 Helpers and the `jlive` bridge are available in request context (`req.aegis`) and in EJS locals.
 They are also available in:
-- Service constructors (`constructor({ helpers, jlive, models, ... })`)
-- Model constructors (`constructor({ helpers, jlive, dbClient, ... })`)
-- Subscribers context (`registerSubscribers({ helpers, jlive, events, ... })`)
-- Any view/handler via request bridge: `req.aegis.helpers`, `req.aegis.jlive`, `req.aegis.locale`, `req.aegis.t`
+- Service constructors (`constructor({ helpers, jlive, env, i18n, models, ... })`)
+- Model constructors (`constructor({ helpers, jlive, env, i18n, dbClient, ... })`)
+- Subscribers context (`registerSubscribers({ helpers, jlive, env, i18n, events, ... })`)
+- Any view/handler via request bridge: `req.aegis.helpers`, `req.aegis.jlive`, `req.aegis.env`, `req.aegis.locale`, `req.aegis.t`, `req.aegis.i18n`
 
 Set helper defaults in `settings.js` (currency/locale):
 
@@ -1897,7 +2068,9 @@ security: {
 ```
 
 `security.appSecret` should be strong (at least 16 chars). It is used to sign CSRF cookies and is required when `security.csrf.requireSignedCookie` is true (default).
-If you run behind a reverse proxy, set `security.ddos.trustProxy` (for example `1`) so client IP and secure-cookie detection are correct.
+New projects load it from `.env` through `APP_SECRET` by default.
+If neither `APP_SECRET` nor `security.appSecret` is set, AegisNode generates a fallback secret and persists it to `.aegis/app-secret`.
+If you run behind a reverse proxy, prefer top-level `trustProxy` (for example `1`) so client IP, secure-cookie detection, and HTTPS-aware auth logic are correct.
 
 Set `security.headers.enabled = false` to disable Helmet.
 Set `security.headers.csp.enabled = false` to disable CSP only.

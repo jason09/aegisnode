@@ -2,6 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
+const BASE_PROCESS_ENV = new Map(Object.entries(process.env));
+const FRAMEWORK_LOADED_ENV_KEYS = new Set();
+
 function isPlainObject(value) {
   return Object.prototype.toString.call(value) === '[object Object]';
 }
@@ -11,6 +14,119 @@ function normalizeEnvironmentName(value, fallback = 'development') {
     return value.trim();
   }
   return fallback;
+}
+
+function resetFrameworkLoadedEnv() {
+  for (const key of FRAMEWORK_LOADED_ENV_KEYS) {
+    if (BASE_PROCESS_ENV.has(key)) {
+      process.env[key] = BASE_PROCESS_ENV.get(key);
+      continue;
+    }
+    delete process.env[key];
+  }
+
+  FRAMEWORK_LOADED_ENV_KEYS.clear();
+}
+
+function decodeQuotedEnvValue(value, quote) {
+  const inner = value.slice(1, -1);
+
+  if (quote === "'") {
+    return inner;
+  }
+
+  return inner
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, '\\');
+}
+
+function normalizeUnquotedEnvValue(value) {
+  const commentIndex = value.search(/\s#/);
+  const rawValue = commentIndex >= 0 ? value.slice(0, commentIndex) : value;
+  return rawValue.trim();
+}
+
+function parseEnvContent(content) {
+  const parsed = {};
+  const source = String(content || '');
+
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) {
+      continue;
+    }
+
+    const match = rawLine.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    const [, key, rawValue = ''] = match;
+    let value = rawValue.trim();
+
+    if (
+      value.length >= 2
+      && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = decodeQuotedEnvValue(value, value[0]);
+    } else {
+      value = normalizeUnquotedEnvValue(value);
+    }
+
+    parsed[key] = value;
+  }
+
+  return parsed;
+}
+
+function applyEnvEntries(entries) {
+  for (const [key, value] of Object.entries(entries)) {
+    if (BASE_PROCESS_ENV.has(key)) {
+      continue;
+    }
+
+    process.env[key] = value;
+    FRAMEWORK_LOADED_ENV_KEYS.add(key);
+  }
+}
+
+function loadEnvFile(filePath, logger = null) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  const parsed = parseEnvContent(fs.readFileSync(filePath, 'utf8'));
+  applyEnvEntries(parsed);
+
+  if (logger) {
+    logger.debug('Environment file loaded: %s', filePath);
+  }
+}
+
+export function loadEnvironmentFiles(rootDir, logger = null) {
+  resetFrameworkLoadedEnv();
+
+  const baseEnvFiles = [
+    path.join(rootDir, '.env'),
+    path.join(rootDir, '.env.local'),
+  ];
+
+  for (const filePath of baseEnvFiles) {
+    loadEnvFile(filePath, logger);
+  }
+
+  const targetEnv = normalizeEnvironmentName(process.env.NODE_ENV, 'development');
+  const envSpecificFiles = [
+    path.join(rootDir, `.env.${targetEnv}`),
+    path.join(rootDir, `.env.${targetEnv}.local`),
+  ];
+
+  for (const filePath of envSpecificFiles) {
+    loadEnvFile(filePath, logger);
+  }
 }
 
 function applyEnvironmentOverrides(config, logger = null) {
@@ -109,6 +225,20 @@ export function defaultConfig(rootDir) {
     env: process.env.NODE_ENV || 'development',
     host: process.env.HOST || '0.0.0.0',
     port: process.env.PORT ? Number(process.env.PORT) : 3000,
+    trustProxy: false,
+    https: {
+      enabled: false,
+      key: null,
+      cert: null,
+      ca: null,
+      pfx: null,
+      keyPath: '',
+      certPath: '',
+      caPath: null,
+      pfxPath: '',
+      passphrase: '',
+      options: {},
+    },
     rootDir,
     staticDir: null,
     templates: {
@@ -282,6 +412,7 @@ async function importDefaultIfExists(filePath) {
 }
 
 export async function loadProjectConfig(rootDir, logger = null) {
+  loadEnvironmentFiles(rootDir, logger);
   const config = defaultConfig(rootDir);
 
   const settingsFile = path.join(rootDir, 'settings.js');

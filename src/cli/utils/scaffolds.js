@@ -53,15 +53,16 @@ export function renderProjectLoaderCjs() {
 `;
 }
 
-export function renderProjectSettings(projectName, appSecret, apps) {
+export function renderProjectSettings(projectName, apps) {
   return `export default {
   appName: '${projectName}',
   env: process.env.NODE_ENV || 'development',
   host: process.env.HOST || '0.0.0.0',
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
+  trustProxy: false,
   security: {
-    // Used to sign security tokens/cookies. Replace with a strong secret in production.
-    appSecret: '${appSecret}',
+    // Loaded from .env by default. Replace or rotate APP_SECRET in production.
+    appSecret: process.env.APP_SECRET || '',
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
@@ -79,7 +80,7 @@ export function renderProjectSettings(projectName, appSecret, apps) {
   },
 
   // Optional sections you can add manually when needed:
-  // templates, i18n, helpers, staticDir, websocket, uploads, auth, api, swagger,
+  // https, templates, i18n, helpers, staticDir, websocket, uploads, auth, api, swagger,
   // architecture, loaders, environments, security.headers/ddos/csrf
 
   apps: [
@@ -127,12 +128,22 @@ export default {
 export function renderProjectGitIgnore() {
   return `node_modules
 .env
+.aegis/
 .DS_Store
 `;
 }
 
 export function renderEnvExample() {
-  return `PORT=3000
+  return `APP_SECRET=replace-with-strong-secret
+PORT=3000
+LOG_LEVEL=info
+NODE_ENV=development
+`;
+}
+
+export function renderProjectEnv(appSecret) {
+  return `APP_SECRET=${appSecret}
+PORT=3000
 LOG_LEVEL=info
 NODE_ENV=development
 `;
