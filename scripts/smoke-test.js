@@ -1,5 +1,6 @@
 import assert from 'assert';
 import crypto from 'crypto';
+import http from 'http';
 import https from 'https';
 import os from 'os';
 import path from 'path';
@@ -9,10 +10,12 @@ import { createApp } from '../src/cli/commands/createapp.js';
 import { generateArtifact } from '../src/cli/commands/generate.js';
 import { createKernel } from '../src/runtime/kernel.js';
 import { runServer } from '../src/cli/commands/runserver.js';
+import { runProject } from '../src/index.js';
 import { createAuthManager, normalizeAuthConfig } from '../src/runtime/auth.js';
 import { loadProjectConfig } from '../src/runtime/config.js';
 import { initializeDatabase, closeDatabase } from '../src/runtime/database.js';
 import { runDoctor } from '../src/cli/commands/doctor.js';
+import { runUpdateDependencies } from '../src/cli/commands/updatedeps.js';
 import { createHelpers } from '../src/runtime/helpers.js';
 
 function createSilentLogger() {
@@ -136,6 +139,16 @@ async function main() {
   assert.match(generatedProjectEnv, /^APP_SECRET=.{16,}$/m);
   const generatedSettings = await fs.readFile(path.join(projectRoot, 'settings.js'), 'utf8');
   assert.match(generatedSettings, /appSecret:\s*process\.env\.APP_SECRET\s*\|\|\s*''/);
+  await assert.rejects(
+    () => runProject({
+      rootDir: projectRoot,
+      overrides: {
+        host: '127.0.0.1',
+        port: 0,
+      },
+    }),
+    /started with "aegisnode runserver"/,
+  );
 
   const envProjectName = 'envdemo';
   const envProjectRoot = path.join(envSandboxRoot, envProjectName);
@@ -174,6 +187,21 @@ async function main() {
   assert.equal(envConfig.logging.level, 'warn');
   assert.equal(envConfig.security.ddos.windowMs, 45000);
   assert.equal(envConfig.security.ddos.maxRequests, 80);
+  await assert.rejects(
+    () => runServer({
+      projectRoot: envProjectRoot,
+      port: 0,
+    }),
+    /development mode/,
+  );
+  const productionProject = await runProject({
+    rootDir: envProjectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+    },
+  });
+  await productionProject.stop();
 
   const dotenvProjectName = 'dotenvdemo';
   const dotenvProjectRoot = path.join(dotenvSandboxRoot, dotenvProjectName);
@@ -374,6 +402,101 @@ dkcqnJD4SGWVeG+KhA==
   for (const relativeFile of filesToCheck) {
     const filePath = path.join(projectRoot, relativeFile);
     await fs.access(filePath);
+  }
+
+  const registryPackages = new Map([
+    ['alpha', '2.0.0'],
+    ['@scope/bravo', '3.4.0'],
+    ['charlie', '5.0.0'],
+    ['delta', '1.0.0'],
+    ['echo', '1.1.0'],
+    ['foxtrot', '8.0.0'],
+  ]);
+  const registryServer = http.createServer((request, response) => {
+    const packageName = decodeURIComponent((request.url || '/').replace(/^\/+/, ''));
+    const latestVersion = registryPackages.get(packageName);
+
+    response.setHeader('content-type', 'application/json');
+
+    if (!latestVersion) {
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+
+    response.end(JSON.stringify({
+      name: packageName,
+      'dist-tags': {
+        latest: latestVersion,
+      },
+    }));
+  });
+  await new Promise((resolve) => {
+    registryServer.listen(0, '127.0.0.1', resolve);
+  });
+  const registryAddress = registryServer.address();
+  assert.ok(registryAddress && typeof registryAddress === 'object');
+  const registryBaseUrl = `http://127.0.0.1:${registryAddress.port}/`;
+
+  try {
+    await fs.writeFile(
+      path.join(projectRoot, 'package.json'),
+      `${JSON.stringify(
+        {
+          name: projectName,
+          version: '1.0.0',
+          private: true,
+          type: 'module',
+          dependencies: {
+            alpha: '^1.0.0',
+            '@scope/bravo': '~3.2.1',
+            localpkg: 'file:../localpkg',
+            foxtrot: '^8.0.0',
+          },
+          devDependencies: {
+            charlie: '4.0.0',
+          },
+          optionalDependencies: {
+            echo: 'latest',
+            aliasecho: 'npm:echo@^0.1.0',
+          },
+          peerDependencies: {
+            delta: '^0.5.0',
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
+    const dependencyUpdateReport = await runUpdateDependencies({
+      projectRoot,
+      registryBaseUrl,
+      installDependencies: false,
+      output: {
+        log() {},
+      },
+    });
+    const updatedPackageJson = JSON.parse(await fs.readFile(path.join(projectRoot, 'package.json'), 'utf8'));
+
+    assert.equal(dependencyUpdateReport.rootDir, projectRoot);
+    assert.equal(dependencyUpdateReport.packageManager, null);
+    assert.equal(dependencyUpdateReport.updatedEntries.length, 6);
+    assert.equal(dependencyUpdateReport.unchangedEntries.length, 1);
+    assert.equal(dependencyUpdateReport.skippedEntries.length, 1);
+    assert.equal(updatedPackageJson.dependencies.alpha, '^2.0.0');
+    assert.equal(updatedPackageJson.dependencies['@scope/bravo'], '~3.4.0');
+    assert.equal(updatedPackageJson.dependencies.localpkg, 'file:../localpkg');
+    assert.equal(updatedPackageJson.dependencies.foxtrot, '^8.0.0');
+    assert.equal(updatedPackageJson.devDependencies.charlie, '5.0.0');
+    assert.equal(updatedPackageJson.optionalDependencies.echo, '1.1.0');
+    assert.equal(updatedPackageJson.optionalDependencies.aliasecho, 'npm:echo@^1.1.0');
+    assert.equal(updatedPackageJson.peerDependencies.delta, '^1.0.0');
+  } finally {
+    await new Promise((resolve) => {
+      registryServer.close(resolve);
+    });
   }
 
   await createApp({

@@ -12,5 +12,6 @@ export async function runServer({ projectRoot, port }) {
   return runProject({
     rootDir: resolvedRoot,
     overrides,
+    startupSource: 'runserver',
   });
 }

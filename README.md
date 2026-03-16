@@ -6,6 +6,7 @@ AegisNode is a modular, view-first Node.js framework starter with:
 
 - CLI generators (`startproject`, `createapp`, `runserver`)
 - Project health checker (`doctor`)
+- Dependency updater (`updatedeps`)
 - Generators for app artifacts (`generate view|model|validator|dto|service|subscriber|route`)
 - DI container
 - Event system with subscribers
@@ -49,12 +50,18 @@ aegisnode createapp users --project blog
 aegisnode generate view profile --app users --project blog
 aegisnode generate route profile --app users --project blog
 aegisnode doctor --project blog
+aegisnode updatedeps --project blog
 ```
 
 `cd blog` is optional. You can run commands from parent folder with `--project blog`.
 
-`createapp`, `generate`, `runserver`, and `doctor` are project-level commands.
+`createapp`, `generate`, `runserver`, `doctor`, and `updatedeps` are project-level commands.
 Run them from the project root; do not `cd` into `apps/<app>`.
+Startup mode rules:
+- Development (`env === development`): start with `aegisnode runserver` only.
+- Non-development (`env !== development`): start with `node loader.cjs` (or your process manager/host pointing to `loader.cjs`).
+- `node app.js` and `node loader.cjs` are rejected in development mode.
+- `aegisnode runserver` is rejected outside development mode.
 
 ## Deploy On Phusion Passenger
 
@@ -117,6 +124,16 @@ aegisnode doctor
 - Security baseline (`appSecret`, csrf/headers/ddos toggles)
 - Auth safety checks (JWT secret, OAuth2 `allowHttp` in production)
 - Template directory availability
+
+Update project dependencies to the current npm `latest` dist-tag:
+
+```bash
+aegisnode updatedeps
+```
+
+`updatedeps` rewrites `dependencies`, `devDependencies`, `optionalDependencies`, and
+`peerDependencies` in the project `package.json`, then runs the detected package manager's
+`install`. It skips non-registry specs such as `file:`, `workspace:`, and git/http sources.
 
 ## Generated Settings Config
 

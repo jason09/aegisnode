@@ -35,7 +35,7 @@
   "dependencies": {
     "ejs": "^3.1.10",
     "express": "^4.21.2",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.3.1",
     "helmet": "^8.1.0",
     "jlive": "^0.1.2",
     "jsonwebtoken": "^9.0.2",

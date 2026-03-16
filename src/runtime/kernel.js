@@ -3492,8 +3492,24 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   };
 }
 
-export async function runProject({ rootDir = process.cwd(), overrides = {} } = {}) {
-  const kernel = await createKernel({ rootDir, overrides });
+export async function runProject({ rootDir = process.cwd(), overrides = {}, startupSource = 'direct' } = {}) {
+  const resolvedRoot = path.resolve(rootDir);
+  const config = await loadProjectConfig(resolvedRoot);
+  const env = String(config?.env || process.env.NODE_ENV || 'development').trim().toLowerCase();
+
+  if (env === 'development' && startupSource !== 'runserver') {
+    throw new Error(
+      `Development mode must be started with "aegisnode runserver". Received startup source "${startupSource}". "node app.js" and "node loader.cjs" are blocked in development.`,
+    );
+  }
+
+  if (env !== 'development' && startupSource === 'runserver') {
+    throw new Error(
+      `aegisnode runserver is available only in development mode. Resolved env="${env}". Use "node loader.cjs" for non-development startup.`,
+    );
+  }
+
+  const kernel = await createKernel({ rootDir: resolvedRoot, overrides });
   await kernel.start();
   return kernel;
 }
