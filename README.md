@@ -15,6 +15,7 @@ AegisNode is a modular, view-first Node.js framework starter with:
 - SQL/NoSQL bootstrap via QueryMesh/Mongoose
 - WebSocket bootstrap using Socket.IO
 - Built-in file uploads with size/type limits (`route.upload`)
+- Built-in mail transport wrapper (`mail.send`, `req.aegis.mail.send`)
 - Centralized config and loaders
 - Security headers via Helmet (configurable CSP) + CSRF protection for form submissions
 - Built-in rate limiting for basic DDoS resistance
@@ -187,7 +188,7 @@ export default {
 };
 ```
 
-Injected app layers also receive `env`, so views/services/models/subscribers can use `env.MY_NAME` without importing `process.env`.
+Injected app layers also receive `env`, so views/services/models/validators/controllers/subscribers/loaders can use `env.MY_NAME` without importing `process.env`.
 
 `settings.js` (generated shape):
 
@@ -225,7 +226,7 @@ export default {
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
 - `startproject` also writes a local `.env` with a generated `APP_SECRET`.
-- Add optional blocks manually only when needed: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- Add optional blocks manually only when needed: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `mail`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
 <!-- SETTINGS_REFERENCE_START -->
@@ -263,6 +264,7 @@ Merge order used at startup:
 | `cache` | `object` / `{ enabled: true, driver: 'memory' }` | Cache backend settings. |
 | `websocket` | `object` / `{ enabled: true, cors: { origin: false } }` | Socket.IO server options. |
 | `uploads` | `object` / see uploads table | Built-in file upload middleware settings used by `route.upload`. |
+| `mail` | `object` / see mail table | Nodemailer-backed mail manager available as injected `mail` and `req.aegis.mail`. |
 | `api` | `object` / see API table | API-app middleware behavior (JSON enforcement, no-store, CSRF skip for API mounts). |
 | `auth` | `object` / see auth tables | JWT or OAuth2 provider settings. |
 | `swagger` | `object` / see swagger table | OpenAPI JSON + Swagger UI settings. |
@@ -365,7 +367,7 @@ i18n notes:
 - Use dotted keys like `home.title`.
 - Placeholder interpolation supports `{name}` style tokens.
 - Relative JSON paths resolve from project root (`settings.js` location).
-- Injected `i18n` is available in handlers, services, models, controllers, and subscribers. Use `i18n.t('key', vars, { locale })`.
+- Injected `i18n` is available in handlers, services, models, validators, controllers, subscribers, and loaders. Use `i18n.t('key', vars, { locale })`.
 - During a request, injected `i18n.t(...)` follows the active request locale. Outside a request, it falls back to `defaultLocale`.
 
 ### Helpers Defaults (`helpers`)
@@ -540,6 +542,26 @@ Mongo config shortcuts accepted in `database.config`:
 | `allowedExtensions` | `string[] \| string` / `[]` | Allowed file extensions (`.jpg`, `.pdf`, ...). Empty means allow all. |
 | `allowApiMultipart` | `boolean` / `true` | Allow `multipart/form-data` on API mounts even when `api.requireJsonForUnsafeMethods` is true. |
 
+### Mail (`mail`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable the built-in mail manager. |
+| `defaults` | `object` / `{ from: '', replyTo: '' }` | Default message fields merged into every outgoing mail payload. |
+| `defaults.from` | `string` / `''` | Default sender used when `mail.send(...)` omits `from`. |
+| `defaults.replyTo` | `string` / `''` | Default `replyTo` header for outgoing mail. |
+| `transport` | `object \| string` / `{}` | Nodemailer transport config or SMTP connection URL passed to `nodemailer.createTransport(...)`. |
+| `transporter` | `object \| null` / `null` | Prebuilt transporter object with `sendMail()`. Useful in tests or custom integrations. |
+| `transportFactory` | `function \| null` / `null` | Factory that returns a transporter object with `sendMail()`. |
+| `verifyOnStartup` | `boolean` / `false` | Call `transporter.verify()` during boot when the transporter supports it. |
+
+Mail notes:
+- The runtime uses [Nodemailer](https://nodemailer.com/).
+- `mail.send(payload)` and `mail.sendMail(payload)` are aliases.
+- Each payload must include at least one of `to`, `cc`, or `bcc`.
+- Each payload must include `from`, or configure `mail.defaults.from`.
+- Injected `mail` is available in handlers, services, models, validators, controllers, subscribers, and loaders, plus `req.aegis.mail`.
+
 ### API (`api`)
 
 | Key | Type / Default | Description |
@@ -669,6 +691,7 @@ loaders: [
 ```
 
 Each loader module must export a function (default export preferred).
+Each loader receives the shared runtime context documented in the injection matrix above, plus `options` from the loader entry.
 
 ### Apps (`apps`)
 
@@ -734,26 +757,27 @@ Usage by file:
 - `routes.js`: route mapping only (`route.get(...)`, `route.post(...)`, `route.use(...)`) to view handlers.
 
 Route modules are mapping-only (`register(route)`).
-Framework context is injected into handlers as first argument (when handler uses 4 args): `{ service, validator, services, models, validators, auth, helpers, i18n, events, ... }`.
+Framework context is injected into handlers as first argument (when handler uses 4 args): `{ service, validator, services, models, validators, auth, mail, helpers, i18n, events, ... }`.
 `req.aegis` is also available.
-`service`/`validator` are app-scoped conveniences. For root/non-app routes, use `services.get('<app>')` and `validators.get('<app>')`.
+`service`/`validator` are app-scoped conveniences. For root/non-app routes, use `services.get('<app>.<name>')` / `validators.get('<app>.<name>')`, or create an app-scoped accessor with `services.forApp('<app>')`.
 
 What “app-scoped” means:
 - In app routes (for example inside `apps/users/routes.js`), `{ service }` resolves to that app service.
-- In root/global routes (`routes.js`), there is no single app context, so use `{ services }` and fetch by name.
+- In root/global routes (`routes.js`), there is no single app context, so use `{ services }` and fetch with `services.forApp('<app>').get('<name>')` or `services.get('<app>.<name>')`.
 
 Injected runtime dependencies:
 
 AegisNode injects resolved runtime objects instead of asking app layers to import framework internals. `config` is the resolved runtime config from `settings.js` plus defaults and runtime overrides.
 
 Available by layer:
-- Views/handlers (`views.js` or any context-first route/controller action): `appName`, `app`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `service`, `model`, `validator`, `database`, `dbClient`
-- Services (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `models`, `validators`, `services`
-- Models (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `helpers`, `jlive`, `dbClient`, `database`
-- Validators (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `dbClient`, `database`
-- Subscribers (`export default function ({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`
-- Controllers (`constructor({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `container`, `app`
-- Request bridge (`req.aegis`): `config`, `env`, `i18n`, `locale`, `localeSource`, `t`, `setLocale`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `appName`, `app`
+- Views/handlers (`views.js` or any context-first route/controller action): `appName`, `app`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `service`, `model`, `validator`, `database`, `dbClient`
+- Services (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `models`, `validators`, `services`
+- Models (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `helpers`, `jlive`, `dbClient`, `database`
+- Validators (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `dbClient`, `database`
+- Subscribers (`export default function ({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`
+- Controllers (`constructor({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `container`, `app`
+- Loaders (`loaders` entry function): `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`, `options`
+- Request bridge (`req.aegis`): `config`, `env`, `i18n`, `locale`, `localeSource`, `t`, `setLocale`, `logger`, `events`, `cache`, `io`, `auth`, `mail`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `appName`, `app`
 - Template locals: `helpers`, `jlive`, `t`, `locale`, `i18n`, `money`, `number`, `dateTime`, `timeElapsed`, `timeDifference`, `breakStr`
 
 Key meanings:
@@ -763,6 +787,7 @@ Key meanings:
 | `config` | Resolved runtime config from `settings.js`, framework defaults, environment overrides, and runtime overrides. |
 | `env` | Frozen environment snapshot (`process.env` plus runtime additions such as `APP_SECRET`). |
 | `i18n` | Translator bridge. During a request it follows the active request locale; outside a request it falls back to `defaultLocale` unless you pass `{ locale }`. |
+| `mail` | Mail manager. Use `mail.send({ to, subject, text/html })` or `mail.sendMail(...)`. |
 | `logger` | Runtime logger instance. |
 | `events` | Event bus used by subscribers and app code. |
 | `cache` | Cache backend instance (memory by default). |
@@ -787,6 +812,7 @@ Key meanings:
 | `protocol` | Server protocol (`http` or `https`). |
 | `container` | Internal DI container. |
 | `declaredAppNames` | Set of apps declared in config/routes. |
+| `options` | Loader-specific options object from a `{ path, options }` loader entry. |
 | `locale` | Active request locale. Available on `req.aegis` and template locals. |
 | `localeSource` | Where the current locale came from (`query`, `cookie`, `header`, `manual`, or `disabled`). |
 | `t` | Convenience translator shortcut for the current request/template scope. |
@@ -798,8 +824,8 @@ export default {
   register(route) {
     route.get('/dashboard', async ({ services }, req, res, next) => {
       try {
-        const usersService = services.get('users');
-        const ordersService = services.get('orders');
+        const usersService = services.forApp('users').get('users');
+        const ordersService = services.forApp('orders').get('orders');
         res.json({
           users: await usersService.list(),
           orders: await ordersService.list(),
@@ -1615,13 +1641,13 @@ Choosing the API:
   Shortcut for `req.aegis.i18n.t('home.title')`. Use this in routes/views when you only need a translated string.
 - `req.aegis.i18n`
   Request-scoped i18n object. Use this when you also need locale metadata or helpers such as `locale`, `localeSource`, `setLocale(...)`, `resolveLocale(...)`, or `forLocale(...)`.
-- Injected `i18n` in handlers/services/models/controllers/subscribers
+- Injected `i18n` in handlers/services/models/validators/controllers/subscribers/loaders
   Runtime-injected i18n bridge. During an HTTP request, `i18n.t(...)` resolves with the same active locale as `req.aegis.i18n.t(...)`, so the translation result is the same.
 
 Important differences:
 
 - `req.aegis.t` and `req.aegis.i18n.t` return the same translation for the current request.
-- Injected `i18n.t(...)` in a service/model is not the same object as `req.aegis.i18n`, but during a request it produces the same translation result for the same key/options.
+- Injected `i18n.t(...)` in a service/model/validator/subscriber is not the same object as `req.aegis.i18n`, but during a request it produces the same translation result for the same key/options.
 - Outside a request, injected `i18n.t(...)` falls back to `defaultLocale`.
 - In background jobs, loaders, or boot-time code, pass an explicit locale when needed: `i18n.t('home.title', { name: 'Jason' }, { locale: 'fr' })`.
 
@@ -1685,6 +1711,82 @@ Notes:
 - After selection, cookie locale becomes the default for that user on next requests.
 - `?lang=fr` also persists automatically when `detectFromQuery` is enabled.
 - Templates get `t`, `locale`, and `i18n` in locals.
+
+## Mail
+
+Configure mail transport in `settings.js`:
+
+```js
+export default {
+  mail: {
+    enabled: true,
+    defaults: {
+      from: 'noreply@example.com',
+      replyTo: 'support@example.com',
+    },
+    transport: {
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587,
+      secure: false,
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    },
+    verifyOnStartup: true,
+  },
+};
+```
+
+Available mail APIs:
+
+- Injected `mail` in handlers/services/models/validators/controllers/subscribers/loaders
+  Shared runtime mail manager. Use `mail.send(...)` or `mail.sendMail(...)`.
+- `req.aegis.mail`
+  Request bridge to the same mail manager used in handler context.
+
+Handler usage:
+
+```js
+route.post('/contact', async ({ mail }, req, res, next) => {
+  try {
+    const info = await mail.send({
+      to: 'support@example.com',
+      subject: 'Contact form',
+      text: req.body?.message || '',
+      html: `<p>${req.body?.message || ''}</p>`,
+    });
+
+    res.status(202).json({ messageId: info.messageId });
+  } catch (error) {
+    next(error);
+  }
+});
+```
+
+Service usage:
+
+```js
+class UsersService {
+  constructor({ mail }) {
+    this.mail = mail;
+  }
+
+  async sendWelcome(user) {
+    return this.mail.send({
+      to: user.email,
+      subject: 'Welcome',
+      html: `<h1>Hello ${user.name}</h1><p>Your account is ready.</p>`,
+    });
+  }
+}
+```
+
+Notes:
+- `mail.send(...)` and `mail.sendMail(...)` are the same method.
+- Messages must include at least one of `to`, `cc`, or `bcc`.
+- Messages must include `from`, or configure `mail.defaults.from`.
+- For tests or custom providers, you can set `mail.transporter` or `mail.transportFactory` instead of `mail.transport`.
 
 ## Helpers And jlive
 

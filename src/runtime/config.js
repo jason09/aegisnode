@@ -324,6 +324,15 @@ export function defaultConfig(rootDir) {
       driver: 'memory',
       options: {},
     },
+    mail: {
+      enabled: false,
+      defaults: {
+        from: '',
+        replyTo: '',
+      },
+      transport: {},
+      verifyOnStartup: false,
+    },
     websocket: {
       enabled: true,
       cors: {

@@ -22,6 +22,7 @@ import { initializeDatabase, closeDatabase } from './database.js';
 import { runLoaders } from './loaders.js';
 import { createRuntimeHelpers } from './helpers.js';
 import { createUploadManager, isMultipartRequestContentType, normalizeUploadsConfig } from './upload.js';
+import { createMailManager, normalizeMailConfig } from './mail.js';
 
 const ROUTE_DEFINITION = 'aegis:routes';
 const PROJECT_ROUTE_DEFINITION = 'aegis:project-routes';
@@ -850,6 +851,7 @@ function createLayerAccessors({ container, context }) {
           config: context.config,
           env: context.env,
           i18n: context.i18n,
+          mail: context.mail,
           logger: context.logger,
           events: context.events,
           cache: context.cache,
@@ -897,6 +899,7 @@ function createLayerAccessors({ container, context }) {
           config: context.config,
           env: context.env,
           i18n: context.i18n,
+          mail: context.mail,
           logger: context.logger,
           events: context.events,
           cache: context.cache,
@@ -943,6 +946,7 @@ function createLayerAccessors({ container, context }) {
           config: context.config,
           env: context.env,
           i18n: context.i18n,
+          mail: context.mail,
           logger: context.logger,
           events: context.events,
           cache: context.cache,
@@ -990,6 +994,7 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
       validators: appName ? layerAccessors.validatorsForApp(appName) : layerAccessors.validators,
       env: context.env,
       i18n: context.i18n,
+      mail: context.mail,
       declaredAppNames: context.declaredAppNames,
     };
   }
@@ -999,6 +1004,7 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
     config: context.config,
     env: context.env,
     i18n: context.i18n,
+    mail: context.mail,
     logger: context.logger,
     events: context.events,
     cache: context.cache,
@@ -1034,6 +1040,7 @@ function bridgeRuntimeContextToRequest(req, runtimeContext = null, appName = nul
     cache: runtimeContext.cache,
     io: runtimeContext.io,
     auth: runtimeContext.auth,
+    mail: runtimeContext.mail,
     helpers: runtimeContext.helpers,
     jlive: runtimeContext.jlive,
     upload: runtimeContext.upload,
@@ -1099,6 +1106,7 @@ function buildHandlerContext(req, runtimeContext = null, currentApp = null) {
     config: aegis.config ?? runtimeContext?.config ?? null,
     env: aegis.env ?? runtimeContext?.env ?? null,
     i18n: aegis.i18n ?? runtimeContext?.i18n ?? null,
+    mail: aegis.mail ?? runtimeContext?.mail ?? null,
     logger: aegis.logger ?? runtimeContext?.logger ?? null,
     events: aegis.events ?? runtimeContext?.events ?? null,
     cache: aegis.cache ?? runtimeContext?.cache ?? null,
@@ -1867,6 +1875,7 @@ function buildControllerDependencies({ appName, runtimeContext = null, container
     config: runtimeContext?.config,
     env: runtimeContext?.env,
     i18n: runtimeContext?.i18n,
+    mail: runtimeContext?.mail,
     logger: runtimeContext?.logger,
     events: runtimeContext?.events,
     cache: runtimeContext?.cache,
@@ -2126,6 +2135,7 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
   const jliveBridge = runtimeContext?.jlive || null;
   const runtimeEnv = isPlainObject(runtimeContext?.env) ? runtimeContext.env : {};
   const authManager = runtimeContext?.auth || null;
+  const mailManager = runtimeContext?.mail || null;
   const uploadManager = runtimeContext?.upload || null;
   const services = runtimeContext?.services || null;
   const models = runtimeContext?.models || null;
@@ -2180,6 +2190,9 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
       }
       if (!Object.prototype.hasOwnProperty.call(req.aegis, 'auth')) {
         req.aegis.auth = authManager;
+      }
+      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'mail')) {
+        req.aegis.mail = mailManager;
       }
       if (!Object.prototype.hasOwnProperty.call(req.aegis, 'upload')) {
         req.aegis.upload = uploadManager;
@@ -2853,6 +2866,7 @@ function buildContext({
   cache,
   templates,
   auth = null,
+  mail = null,
   helpers = {},
   jlive = null,
   upload = null,
@@ -2874,6 +2888,7 @@ function buildContext({
     cache,
     templates,
     auth,
+    mail,
     helpers,
     jlive,
     upload,
@@ -3345,6 +3360,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   config.maintenance = normalizeMaintenanceConfig(config.maintenance, config.appName || path.basename(rootDir));
   config.architecture = normalizeArchitectureConfig(config.architecture);
   config.uploads = normalizeUploadsConfig(config.uploads, rootDir);
+  config.mail = normalizeMailConfig(config.mail);
 
   const runtimeEnv = Object.freeze({
     ...process.env,
@@ -3384,6 +3400,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   if (auth?.ready && typeof auth.ready.then === 'function') {
     await auth.ready;
   }
+  const mail = await createMailManager(config.mail, logger);
 
   container.set('config', config);
   container.set('env', runtimeEnv);
@@ -3397,6 +3414,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   container.set('dbClient', database?.client ?? null);
   container.set('cache', cache);
   container.set('auth', auth);
+  container.set('mail', mail);
   container.set('templates', templateConfig);
   container.set('helpers', runtimeHelpers.helpers);
   container.set('jlive', runtimeHelpers.jlive);
@@ -3418,6 +3436,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
     cache,
     templates: templateConfig,
     auth,
+    mail,
     helpers: runtimeHelpers.helpers,
     jlive: runtimeHelpers.jlive,
     upload,
@@ -3635,6 +3654,9 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
         if (auth && typeof auth.close === 'function') {
           await auth.close();
         }
+        if (mail && typeof mail.close === 'function') {
+          await mail.close();
+        }
         await closeDatabase(database);
         events.removeAll();
         logger.info('AegisNode server stopped.');
@@ -3657,6 +3679,9 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
 
       if (auth && typeof auth.close === 'function') {
         await auth.close();
+      }
+      if (mail && typeof mail.close === 'function') {
+        await mail.close();
       }
       await closeDatabase(database);
       events.removeAll();

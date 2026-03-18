@@ -4,6 +4,7 @@ export { createEventBus } from './runtime/events.js';
 export { createLogger } from './runtime/logger.js';
 export { deepMerge, normalizeApps } from './runtime/config.js';
 export { createAuthManager, normalizeAuthConfig, createAuthGuard } from './runtime/auth.js';
+export { createMailManager, normalizeMailConfig } from './runtime/mail.js';
 export {
   money,
   number,

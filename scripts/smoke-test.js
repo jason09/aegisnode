@@ -565,6 +565,70 @@ dkcqnJD4SGWVeG+KhA==
   assert.match(usersRoutesFile, /import ProfileView from '\.\/profile\.view\.js';/);
   assert.match(usersRoutesFile, /route\.get\('\/profile', ProfileView\.index\);/);
   await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'services.js'),
+    `class UsersService {
+  constructor({ models, mail }) {
+    this.model = models.get('users');
+    this.mail = mail;
+  }
+
+  async list() {
+    return this.model.list();
+  }
+
+  async getById(id) {
+    return this.model.getById(id);
+  }
+
+  async create(payload) {
+    return this.model.create(payload);
+  }
+
+  async update(id, payload) {
+    return this.model.update(id, payload);
+  }
+
+  async remove(id) {
+    return this.model.remove(id);
+  }
+
+  async sendSmokeMail() {
+    return this.mail.send({
+      to: 'user@example.com',
+      subject: 'Smoke mail',
+      html: '<p>mail transport ok</p>',
+    });
+  }
+}
+
+export default {
+  users: UsersService,
+};
+`,
+    'utf8',
+  );
+  const sentMail = [];
+  const fakeTransporter = {
+    async sendMail(message) {
+      sentMail.push({ ...message });
+      const accepted = Array.isArray(message.to) ? message.to : [message.to];
+      return {
+        messageId: `mail-${sentMail.length}`,
+        accepted,
+        rejected: [],
+        envelope: {
+          from: message.from,
+          to: accepted,
+        },
+        response: '250 queued',
+      };
+    },
+    async verify() {
+      return true;
+    },
+    async close() {},
+  };
+  await fs.writeFile(
     path.join(projectRoot, 'routes.js'),
     `// AEGIS_APP_IMPORTS_START
 import users from './apps/users/routes.js';
@@ -578,6 +642,22 @@ export default {
 
     route.get('/maintenance-page', (req, res) => {
       res.type('html').send('<!doctype html><html><body><h1>Custom maintenance route</h1><p>Temporarily offline.</p></body></html>');
+    });
+
+    route.get('/mail/send', async ({ mail, services }, req, res, next) => {
+      try {
+        const info = await services.forApp('users').get('users').sendSmokeMail();
+
+        res.json({
+          enabled: mail.enabled,
+          viaReq: req.aegis.mail.enabled,
+          sameBridge: req.aegis.mail === mail,
+          from: info.envelope.from,
+          accepted: info.accepted,
+        });
+      } catch (error) {
+        next(error);
+      }
     });
 
     // AEGIS_PROJECT_APP_ROUTES_START
@@ -668,6 +748,13 @@ export default {
     overrides: {
       host: '127.0.0.1',
       port: 0,
+      mail: {
+        enabled: true,
+        defaults: {
+          from: 'noreply@example.com',
+        },
+        transporter: fakeTransporter,
+      },
     },
   });
 
@@ -693,6 +780,18 @@ export default {
   const profileResponse = await fetch(`http://127.0.0.1:${port}/users/profile`);
   const profileJson = await profileResponse.json();
   assert.equal(profileJson.view, 'profile');
+  const mailResponse = await fetch(`http://127.0.0.1:${port}/mail/send`);
+  assert.equal(mailResponse.status, 200);
+  const mailJson = await mailResponse.json();
+  assert.equal(mailJson.enabled, true);
+  assert.equal(mailJson.viaReq, true);
+  assert.equal(mailJson.sameBridge, true);
+  assert.equal(mailJson.from, 'noreply@example.com');
+  assert.equal(mailJson.accepted[0], 'user@example.com');
+  assert.equal(sentMail.length, 1);
+  assert.equal(sentMail[0].from, 'noreply@example.com');
+  assert.equal(sentMail[0].subject, 'Smoke mail');
+  assert.equal(sentMail[0].html, '<p>mail transport ok</p>');
   await kernel.stop();
 
   const kernelWithApiApps = await createKernel({
