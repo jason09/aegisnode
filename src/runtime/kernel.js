@@ -26,6 +26,7 @@ import { createUploadManager, isMultipartRequestContentType, normalizeUploadsCon
 const ROUTE_DEFINITION = 'aegis:routes';
 const PROJECT_ROUTE_DEFINITION = 'aegis:project-routes';
 const DEFAULT_INSTALL_TEMPLATE_PATH = fileURLToPath(new URL('./views/default-install.ejs', import.meta.url));
+const DEFAULT_MAINTENANCE_TEMPLATE_PATH = fileURLToPath(new URL('./views/default-maintenance.ejs', import.meta.url));
 const RAW_HTML_SYMBOL = Symbol('aegis:raw-html');
 const EMPTY_ROUTE_CONTEXT = Object.freeze({});
 const REQUEST_I18N_CONTEXT = new AsyncLocalStorage();
@@ -300,6 +301,58 @@ function normalizeTemplatesConfig(rawTemplates, rootDir) {
     base,
     appBases,
     locals,
+  };
+}
+
+function normalizeMaintenanceConfig(rawMaintenance, appName = 'AegisNode') {
+  if (rawMaintenance === false || rawMaintenance === null || rawMaintenance === undefined) {
+    return {
+      enabled: false,
+      statusCode: 503,
+      route: null,
+      html: '',
+      excludePaths: [],
+      retryAfter: null,
+    };
+  }
+
+  const source = typeof rawMaintenance === 'string'
+    ? { enabled: true, html: rawMaintenance }
+    : (rawMaintenance === true
+        ? { enabled: true }
+        : (isPlainObject(rawMaintenance) ? rawMaintenance : {}));
+
+  const rawHtml = typeof source.html === 'string' ? source.html : '';
+  const statusCodeNumber = Number(source.statusCode);
+  const route = typeof source.route === 'string' && source.route.trim().length > 0
+    ? normalizeMountPrefix(source.route.trim())
+    : null;
+  const excludePaths = Array.isArray(source.excludePaths)
+    ? [...new Set(
+        source.excludePaths
+          .filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+          .map((entry) => normalizeMountPrefix(entry.trim())),
+      )]
+    : [];
+  const retryAfter = typeof source.retryAfter === 'string' && source.retryAfter.trim().length > 0
+    ? source.retryAfter.trim()
+    : (Number.isFinite(Number(source.retryAfter)) && Number(source.retryAfter) >= 0
+        ? String(Math.floor(Number(source.retryAfter)))
+        : null);
+  const enabled = rawMaintenance === true
+    || typeof rawMaintenance === 'string'
+    || source.enabled === true
+    || (rawHtml.trim().length > 0 && source.enabled !== false);
+
+  return {
+    enabled,
+    statusCode: Number.isInteger(statusCodeNumber) && statusCodeNumber >= 400 && statusCodeNumber <= 599
+      ? statusCodeNumber
+      : 503,
+    route,
+    html: rawHtml.trim(),
+    excludePaths,
+    retryAfter,
   };
 }
 
@@ -2245,11 +2298,31 @@ async function loadDefaultInstallTemplate(logger) {
   }
 }
 
+async function loadDefaultMaintenanceTemplate(logger) {
+  try {
+    return await fsPromises.readFile(DEFAULT_MAINTENANCE_TEMPLATE_PATH, 'utf8');
+  } catch (error) {
+    logger.error('Unable to load default maintenance template: %s', error?.message || String(error));
+    throw error;
+  }
+}
+
 function renderDefaultInstallPage(template, config) {
   return ejs.render(template, {
     appName: config.appName || 'AegisNode',
     env: config.env || 'development',
     createAppCommand: 'aegisnode createapp users',
+    nowYear: new Date().getFullYear(),
+  });
+}
+
+function renderDefaultMaintenancePage(template, config, maintenanceConfig, requestPath) {
+  return ejs.render(template, {
+    appName: config.appName || 'AegisNode',
+    env: config.env || 'development',
+    requestPath: requestPath || '/',
+    retryAfter: maintenanceConfig.retryAfter,
+    statusCode: maintenanceConfig.statusCode,
     nowYear: new Date().getFullYear(),
   });
 }
@@ -2819,6 +2892,99 @@ function attachDefaultMiddlewares(expressApp, config, rootDir) {
   }
 }
 
+function sendMaintenanceFallbackResponse(req, res, config, maintenanceConfig, maintenanceTemplate, logger) {
+  try {
+    const requestPath = typeof req?.aegis?.maintenance?.requestedPath === 'string'
+      ? req.aegis.maintenance.requestedPath
+      : String(req?.path || req?.originalUrl || '/');
+    const html = maintenanceConfig.html || renderDefaultMaintenancePage(
+      maintenanceTemplate,
+      config,
+      maintenanceConfig,
+      requestPath,
+    );
+
+    res.setHeader('Cache-Control', 'no-store');
+    if (maintenanceConfig.retryAfter) {
+      res.setHeader('Retry-After', maintenanceConfig.retryAfter);
+    }
+
+    return res.status(maintenanceConfig.statusCode).type('html').send(html);
+  } catch (error) {
+    logger.error('Maintenance page render failed: %s', error?.message || String(error));
+    return res.status(500).json({ error: 'Template render error' });
+  }
+}
+
+function attachMaintenanceMode(expressApp, config, logger, maintenanceTemplate) {
+  const maintenanceConfig = isPlainObject(config?.maintenance)
+    ? config.maintenance
+    : normalizeMaintenanceConfig(config?.maintenance, config?.appName || 'AegisNode');
+  config.maintenance = maintenanceConfig;
+
+  if (!maintenanceConfig.enabled) {
+    return null;
+  }
+
+  expressApp.use((req, res, next) => {
+    const requestPath = String(req.path || req.originalUrl || '/');
+    const isExcluded = maintenanceConfig.excludePaths.some((prefix) => requestPathMatchesPrefix(requestPath, prefix));
+
+    if (isExcluded) {
+      return next();
+    }
+
+    req.aegis = req.aegis || {};
+    req.aegis.maintenance = {
+      enabled: true,
+      requestedPath: requestPath,
+      route: maintenanceConfig.route,
+      rewritten: false,
+      originalUrl: req.originalUrl,
+    };
+
+    if (!maintenanceConfig.route) {
+      return sendMaintenanceFallbackResponse(req, res, config, maintenanceConfig, maintenanceTemplate, logger);
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    if (maintenanceConfig.retryAfter) {
+      res.setHeader('Retry-After', maintenanceConfig.retryAfter);
+    }
+
+    if (requestPath !== maintenanceConfig.route) {
+      const rawUrl = String(req.url || requestPath);
+      const queryIndex = rawUrl.indexOf('?');
+      const query = queryIndex >= 0 ? rawUrl.slice(queryIndex) : '';
+
+      req.aegis.maintenance.rewritten = true;
+      req.url = `${maintenanceConfig.route}${query}`;
+    }
+
+    res.status(maintenanceConfig.statusCode);
+    return next();
+  });
+
+  logger.info(
+    'Maintenance mode enabled. Returning HTML with status %s%s%s.',
+    maintenanceConfig.statusCode,
+    maintenanceConfig.route
+      ? ` via route ${maintenanceConfig.route}`
+      : ' via internal fallback',
+    maintenanceConfig.excludePaths.length > 0
+      ? ` (excluded paths: ${maintenanceConfig.excludePaths.join(', ')})`
+      : '',
+  );
+
+  return (req, res, next) => {
+    if (res.headersSent || req.aegis?.maintenance?.enabled !== true) {
+      return next();
+    }
+
+    return sendMaintenanceFallbackResponse(req, res, config, maintenanceConfig, maintenanceTemplate, logger);
+  };
+}
+
 function attachSecurityMiddlewares(expressApp, config, logger) {
   if (!isPlainObject(config.security)) {
     config.security = {};
@@ -3176,6 +3342,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
     appSecret: resolvedAppSecret,
   });
   config.swagger = normalizeSwaggerConfig(config.swagger);
+  config.maintenance = normalizeMaintenanceConfig(config.maintenance, config.appName || path.basename(rootDir));
   config.architecture = normalizeArchitectureConfig(config.architecture);
   config.uploads = normalizeUploadsConfig(config.uploads, rootDir);
 
@@ -3184,6 +3351,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
     APP_SECRET: process.env.APP_SECRET || config.security?.appSecret || '',
   });
   const defaultInstallTemplate = await loadDefaultInstallTemplate(logger);
+  const defaultMaintenanceTemplate = await loadDefaultMaintenanceTemplate(logger);
   const runtimeHelpers = await createRuntimeHelpers({ logger, config });
   const i18nConfig = normalizeI18nConfig(config.i18n, rootDir, logger);
   config.i18n = i18nConfig;
@@ -3293,6 +3461,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   attachSecurityMiddlewares(expressApp, config, logger);
   attachDdosProtection(expressApp, config, logger);
   attachDefaultMiddlewares(expressApp, config, rootDir);
+  const maintenanceFallback = attachMaintenanceMode(expressApp, config, logger, defaultMaintenanceTemplate);
   attachApiMiddlewares(expressApp, config, declaredApps, logger);
   attachRequestRuntimeBridge(expressApp, context);
   attachOAuth2AuthorizationServer(expressApp, auth, logger);
@@ -3428,6 +3597,10 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
 
   if (projectRoutes?.routes || !projectRouteState.hasRootGet) {
     expressApp.use('/', rootRouter);
+  }
+
+  if (typeof maintenanceFallback === 'function') {
+    expressApp.use(maintenanceFallback);
   }
 
   attachErrorHandlers(expressApp, logger);

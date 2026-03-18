@@ -564,6 +564,83 @@ dkcqnJD4SGWVeG+KhA==
   const usersRoutesFile = await fs.readFile(path.join(projectRoot, 'apps', 'users', 'routes.js'), 'utf8');
   assert.match(usersRoutesFile, /import ProfileView from '\.\/profile\.view\.js';/);
   assert.match(usersRoutesFile, /route\.get\('\/profile', ProfileView\.index\);/);
+  await fs.writeFile(
+    path.join(projectRoot, 'routes.js'),
+    `// AEGIS_APP_IMPORTS_START
+import users from './apps/users/routes.js';
+// AEGIS_APP_IMPORTS_END
+
+export default {
+  register(route) {
+    route.get('/health', (req, res) => {
+      res.json({ status: 'ok' });
+    });
+
+    route.get('/maintenance-page', (req, res) => {
+      res.type('html').send('<!doctype html><html><body><h1>Custom maintenance route</h1><p>Temporarily offline.</p></body></html>');
+    });
+
+    // AEGIS_PROJECT_APP_ROUTES_START
+    route.use("/users", users);
+    // AEGIS_PROJECT_APP_ROUTES_END
+  },
+};
+`,
+    'utf8',
+  );
+
+  const maintenanceKernel = await createKernel({
+    rootDir: projectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+      maintenance: {
+        enabled: true,
+        route: '/maintenance-page',
+        excludePaths: ['/health'],
+        retryAfter: 120,
+      },
+    },
+  });
+  await maintenanceKernel.start();
+  const maintenanceAddress = maintenanceKernel.context.server.address();
+  const maintenancePort = typeof maintenanceAddress === 'object' && maintenanceAddress ? maintenanceAddress.port : 0;
+  const maintenanceUsersResponse = await fetch(`http://127.0.0.1:${maintenancePort}/users`);
+  assert.equal(maintenanceUsersResponse.status, 503);
+  assert.equal(maintenanceUsersResponse.headers.get('retry-after'), '120');
+  assert.match(maintenanceUsersResponse.headers.get('content-type') || '', /text\/html/);
+  const maintenanceHtml = await maintenanceUsersResponse.text();
+  assert.match(maintenanceHtml, /Custom maintenance route/);
+  const maintenanceHealthResponse = await fetch(`http://127.0.0.1:${maintenancePort}/health`);
+  assert.equal(maintenanceHealthResponse.status, 200);
+  const maintenanceHealthJson = await maintenanceHealthResponse.json();
+  assert.equal(maintenanceHealthJson.status, 'ok');
+  await maintenanceKernel.stop();
+
+  const maintenanceFallbackKernel = await createKernel({
+    rootDir: projectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+      maintenance: {
+        enabled: true,
+        route: '/missing-maintenance-route',
+        excludePaths: ['/health'],
+      },
+    },
+  });
+  await maintenanceFallbackKernel.start();
+  const maintenanceFallbackAddress = maintenanceFallbackKernel.context.server.address();
+  const maintenanceFallbackPort = typeof maintenanceFallbackAddress === 'object' && maintenanceFallbackAddress
+    ? maintenanceFallbackAddress.port
+    : 0;
+  const maintenanceFallbackResponse = await fetch(`http://127.0.0.1:${maintenanceFallbackPort}/users`);
+  assert.equal(maintenanceFallbackResponse.status, 503);
+  assert.match(maintenanceFallbackResponse.headers.get('content-type') || '', /text\/html/);
+  const maintenanceFallbackHtml = await maintenanceFallbackResponse.text();
+  assert.match(maintenanceFallbackHtml, /We&apos;ll be back soon\.|We'll be back soon\./);
+  assert.match(maintenanceFallbackHtml, /Requested Path/);
+  await maintenanceFallbackKernel.stop();
 
   const settingsFilePath = path.join(projectRoot, 'settings.js');
   const settingsBeforeUndeclaredCheck = await fs.readFile(settingsFilePath, 'utf8');

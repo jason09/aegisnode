@@ -7,6 +7,7 @@ AegisNode is a modular, view-first Node.js framework starter with:
 - CLI generators (`startproject`, `createapp`, `runserver`)
 - Project health checker (`doctor`)
 - Dependency updater (`updatedeps`)
+- Maintenance mode with custom HTML responses
 - Generators for app artifacts (`generate view|model|validator|dto|service|subscriber|route`)
 - DI container
 - Event system with subscribers
@@ -134,6 +135,42 @@ aegisnode updatedeps
 `updatedeps` rewrites `dependencies`, `devDependencies`, `optionalDependencies`, and
 `peerDependencies` in the project `package.json`, then runs the detected package manager's
 `install`. It skips non-registry specs such as `file:`, `workspace:`, and git/http sources.
+
+## Maintenance Mode
+
+Enable maintenance mode in `settings.js` to serve a maintenance route with `503 Service Unavailable`.
+If that route is missing or does not respond, AegisNode renders its internal maintenance fallback view:
+
+```js
+export default {
+  maintenance: {
+    enabled: true,
+    route: '/maintenance',
+    excludePaths: ['/health'],
+    retryAfter: 120,
+  },
+};
+```
+
+```js
+export default {
+  register(route) {
+    route.get('/maintenance', (req, res) => {
+      res.render('maintenance', {
+        title: 'Scheduled maintenance',
+      });
+    });
+  },
+};
+```
+
+Notes:
+- `maintenance.route` is internally rewritten, so requests like `/users` can display your maintenance page without a redirect.
+- If `maintenance.route` is not defined, or the route does not answer, the bundled fallback view is rendered.
+- `excludePaths` lets selected endpoints keep running during maintenance.
+- `retryAfter` sets the HTTP `Retry-After` header.
+- `maintenance: true` uses the built-in default maintenance page.
+- `maintenance: '<html>...</html>'` is still accepted as a shorthand for direct custom HTML.
 
 ## Generated Settings Config
 

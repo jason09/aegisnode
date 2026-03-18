@@ -80,7 +80,7 @@ export function renderProjectSettings(projectName, apps) {
   },
 
   // Optional sections you can add manually when needed:
-  // https, templates, i18n, helpers, staticDir, websocket, uploads, auth, api, swagger,
+  // maintenance, https, templates, i18n, helpers, staticDir, websocket, uploads, auth, api, swagger,
   // architecture, loaders, environments, security.headers/ddos/csrf
 
   apps: [

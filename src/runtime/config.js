@@ -241,6 +241,14 @@ export function defaultConfig(rootDir) {
     },
     rootDir,
     staticDir: null,
+    maintenance: {
+      enabled: false,
+      statusCode: 503,
+      route: null,
+      html: '',
+      excludePaths: [],
+      retryAfter: null,
+    },
     templates: {
       enabled: true,
       engine: 'ejs',
