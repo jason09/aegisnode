@@ -11,6 +11,15 @@ It keeps the request/response model familiar while organizing the codebase aroun
 It works well for projects that mix server-rendered pages and JSON endpoints, for teams that want a consistent project shape from the start, and for codebases that need built-in support for common backend concerns like auth, uploads, i18n, mail, maintenance mode, and environment-driven configuration.
 The goal is to reduce setup time, remove repetitive infrastructure work, and give the project a cleaner long-term structure without making day-to-day development feel heavy.
 
+## Documentation Guide
+
+If you are new to AegisNode, read this README in this order:
+- Quick Start: create a project, install dependencies, run the server, and understand startup mode rules.
+- Core Concepts And App Structure: understand apps, layers, injected runtime context, and project flow.
+- Common Tasks And Feature Guides: uploads, API apps, auth, templates, i18n, mail, and related features.
+- Full Settings Reference: use this as the complete config manual once you already know what feature you need.
+- Runtime Patterns And Advanced Topics: validators, strict layers, subscribers, and security details.
+
 ## How AegisNode Helps
 
 AegisNode helps by standardizing the parts that usually consume time early in a project:
@@ -65,7 +74,9 @@ Supported files:
 
 Shell or hosting-panel environment variables win over values from `.env` files.
 
-## CLI
+## Quick Start
+
+### CLI
 
 ```bash
 npm install -g aegisnode
@@ -91,7 +102,7 @@ Startup mode rules:
 - `node app.js` and `node loader.cjs` are rejected in development mode.
 - `aegisnode runserver` is rejected outside development mode.
 
-## Deploy On Phusion Passenger
+### Deploy On Phusion Passenger
 
 AegisNode supports Passenger-style startup using the generated `loader.cjs`.
 
@@ -163,7 +174,7 @@ aegisnode updatedeps
 `peerDependencies` in the project `package.json`, then runs the detected package manager's
 `install`. It skips non-registry specs such as `file:`, `workspace:`, and git/http sources.
 
-## Maintenance Mode
+### Maintenance Mode
 
 Enable maintenance mode in `settings.js` to serve a maintenance route with `503 Service Unavailable`.
 If that route is missing or does not respond, AegisNode renders its internal maintenance fallback view:
@@ -199,7 +210,7 @@ Notes:
 - `maintenance: true` uses the built-in default maintenance page.
 - `maintenance: '<html>...</html>'` is still accepted as a shorthand for direct custom HTML.
 
-## Generated Settings Config
+### Generated Settings Config
 
 `startproject` generates a minimal `settings.js` and runtime defaults fill the rest.
 
@@ -256,7 +267,7 @@ Notes:
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
 <!-- SETTINGS_REFERENCE_START -->
-## Settings Reference (All Settings)
+## Full Settings Reference
 
 All fields below are supported in `settings.js`. If you omit a field, AegisNode uses the runtime default.
 
@@ -771,7 +782,9 @@ Behavior:
 
 <!-- SETTINGS_REFERENCE_END -->
 
-## App File Usage Examples
+## Core Concepts And App Structure
+
+### App File Usage Examples
 
 Each generated app usually contains:
 - `apps/<app>/views.js`
@@ -982,7 +995,9 @@ export default {
 };
 ```
 
-## File Uploads
+## Common Tasks And Feature Guides
+
+### File Uploads
 
 AegisNode provides built-in upload middleware on route API as `route.upload`.
 
@@ -1104,7 +1119,7 @@ Important behavior:
 - For API mounts, multipart is allowed only when `uploads.allowApiMultipart=true`.
 - For non-API form submissions, CSRF token is required by default.
 
-## API Apps
+### API Apps
 
 `api` does not create a separate app type. You still build a normal AegisNode app with `routes.js`, `views.js`, `services.js`, and `validators.js`.
 The `api` setting only changes middleware behavior for selected app mounts.
@@ -1217,7 +1232,7 @@ What it does not change:
 - It does not force a separate `controllers/` or `api/` folder.
 - It does not convert a view into JSON automatically; your handler still decides what to return.
 
-## API And Auth Together
+### API And Auth Together
 
 `api` and `auth` are separate features that are often used together:
 
@@ -1242,7 +1257,7 @@ Quick comparison:
 | `api` + JWT | Your own frontend/mobile app talks to your backend and you control both sides. | `api.apps = [...]`, `auth.enabled = true`, `auth.provider = 'jwt'`, plus your own login/token routes |
 | `api` + OAuth2 | External clients, partner apps, or machine clients need standard token flows. | `api.apps = [...]`, `auth.enabled = true`, `auth.provider = 'oauth2'` |
 
-## Database Config
+### Database Config
 
 Use `database.config` for every dialect (SQL and MongoDB/Mongoose):
 
@@ -1310,7 +1325,7 @@ class UsersModel {
 }
 ```
 
-## Environment Overrides (Single settings.js)
+### Environment Overrides (Single settings.js)
 
 You can keep a single `settings.js` and define per-environment overrides:
 
@@ -1343,7 +1358,7 @@ Behavior:
 - `environments[env]` is applied last.
 - `env` comes from `settings.env` (fallback: `NODE_ENV`, then `development`).
 
-## Auth (JWT Or OAuth2)
+### Auth (JWT Or OAuth2)
 
 `auth` is independent from `api`.
 You can protect normal web routes, API routes, or both.
@@ -1474,7 +1489,7 @@ OAuth2 is the better choice when:
 - you need machine clients as well as browser/mobile clients,
 - or third parties must integrate without depending on your custom JWT login route shape.
 
-### Route Usage (JWT vs OAuth2)
+#### Route Usage (JWT vs OAuth2)
 
 `startproject` gives you one root route file: `routes.js`.
 All your custom HTTP routes are defined there (or in app routes you mount with `route.use(...)`).
@@ -1509,7 +1524,7 @@ Typical setup patterns:
 - Web app + JWT:
   no `api` block required if routes are normal form/web routes, but you can still use JWT for selected endpoints.
 
-### OAuth2 Full Usage
+#### OAuth2 Full Usage
 
 1. Register clients (server-side only)
 
@@ -1714,7 +1729,7 @@ Implementation notes:
 - CSRF checks are skipped for OAuth2 server endpoints (`/oauth/*` + metadata) by design.
 - This is OAuth2 (not OpenID Connect); no `id_token` endpoint/flow.
 
-## Swagger (OpenAPI UI)
+### Swagger (OpenAPI UI)
 
 Enable Swagger in `settings.js`:
 
@@ -1734,7 +1749,7 @@ Behavior:
 - If `openapi.json` exists in project root, it is loaded.
 - If no file is found, AegisNode serves a default minimal OpenAPI document.
 
-## Templates (EJS + base.ejs)
+### Templates (EJS + base.ejs)
 
 Set template config in `settings.js`:
 
@@ -1765,7 +1780,7 @@ route.get('/', (req, res) => {
 `home.ejs` is rendered first, then injected into `base.ejs`.
 Use `<%- content %>` (or `<%- body %>`) in your `base.ejs` to print page content.
 
-## Internationalization (i18n)
+### Internationalization (i18n)
 
 Configure i18n in `settings.js`:
 
@@ -1896,7 +1911,7 @@ Notes:
 - `?lang=fr` also persists automatically when `detectFromQuery` is enabled.
 - Templates get `t`, `locale`, and `i18n` in locals.
 
-## Mail
+### Mail
 
 Configure mail transport in `settings.js`:
 
@@ -1972,7 +1987,7 @@ Notes:
 - Messages must include `from`, or configure `mail.defaults.from`.
 - For tests or custom providers, you can set `mail.transporter` or `mail.transportFactory` instead of `mail.transport`.
 
-## Helpers And jlive
+### Helpers And jlive
 
 Helpers and the `jlive` bridge are available in request context (`req.aegis`) and in EJS locals.
 They are also available in:
@@ -2056,7 +2071,7 @@ Mongo id helpers:
 - If `jlive` package is installed, bridge uses its methods.
 - If not installed, `jlive.generate()` still works (crypto fallback), while crypto methods throw `JLIVE_UNAVAILABLE`.
 
-## Template Locals From Settings
+### Template Locals From Settings
 
 You can inject custom functions/classes into all template renders from `settings.js`:
 
@@ -2100,7 +2115,9 @@ Then in EJS:
 <p><%= new ViewBag('Dashboard').title %></p>
 ```
 
-## Middleware
+## Runtime Patterns And Advanced Topics
+
+### Middleware
 
 Route API supports Express-style middleware chains:
 
@@ -2116,7 +2133,7 @@ route.use(requestLogger);
 route.use('/admin', adminGuard, adminRoutes);
 ```
 
-## Validators (Between Route And Service)
+### Validators (Between Route And Service)
 
 Each app can define `apps/<app>/validators.js`.
 Routes should validate/sanitize input first, then call services.
@@ -2224,7 +2241,7 @@ export default {
 };
 ```
 
-## Service And Model Flow (Strict Layers)
+### Service And Model Flow (Strict Layers)
 
 Enable strict layering in `settings.js`:
 
@@ -2300,7 +2317,7 @@ export default {
 };
 ```
 
-## Subscribers
+### Subscribers
 
 Each app can define `apps/<app>/subscribers.js`.
 It should export one default function that registers one or many listeners.
@@ -2338,7 +2355,7 @@ export default {
 };
 ```
 
-## Example: Socket Lifecycle Via Subscribers
+### Example: Socket Lifecycle Via Subscribers
 
 ```js
 // apps/chat/subscribers.js
@@ -2363,7 +2380,7 @@ export default function registerChatSubscribers({ events, logger, io }) {
 }
 ```
 
-## Security Headers
+### Security Headers
 
 Project settings can control default security headers:
 
