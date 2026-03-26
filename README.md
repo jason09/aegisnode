@@ -2,7 +2,33 @@
 
 ![AegisNode Banner](assets/aegisnode-banner.svg)
 
-AegisNode is a modular, view-first Node.js framework starter with:
+AegisNode is a modular, view-first Node.js framework for building web apps, JSON APIs, and hybrid projects without spending the first part of the project wiring the same infrastructure again and again.
+It gives you a structured project layout, runtime injection, CLI scaffolding, and production-ready defaults while still keeping the Node.js and Express ecosystem familiar.
+
+AegisNode is designed for developers who want more structure than raw Express, but do not want a framework that hides the Node.js runtime behind too many abstractions.
+It keeps the request/response model familiar while organizing the codebase around clear app boundaries, runtime-injected dependencies, and reusable layers such as views, services, models, validators, and subscribers.
+
+It works well for projects that mix server-rendered pages and JSON endpoints, for teams that want a consistent project shape from the start, and for codebases that need built-in support for common backend concerns like auth, uploads, i18n, mail, maintenance mode, and environment-driven configuration.
+The goal is to reduce setup time, remove repetitive infrastructure work, and give the project a cleaner long-term structure without making day-to-day development feel heavy.
+
+## How AegisNode Helps
+
+AegisNode helps by standardizing the parts that usually consume time early in a project:
+- project scaffolding and app generation,
+- route and layer organization,
+- dependency injection and shared runtime context,
+- config loading and environment overrides,
+- auth, upload, mail, websocket, and i18n integration,
+- operational helpers such as health checks, maintenance mode, and project diagnostics.
+
+This means you spend less time writing framework glue and more time writing business features.
+
+## Why Use AegisNode
+
+Choose AegisNode if you want a project starter that remains readable as it grows.
+It keeps the development model simple, but adds enough structure and tooling to make larger codebases easier to navigate, extend, and maintain.
+
+Core features:
 
 - CLI generators (`startproject`, `createapp`, `runserver`)
 - Project health checker (`doctor`)
@@ -571,6 +597,11 @@ Mail notes:
 | `requireJsonForUnsafeMethods` | `boolean` / `true` | Reject unsafe API payloads unless `Content-Type` is JSON (`415`). Multipart is allowed when `uploads.allowApiMultipart=true`. |
 | `noStoreHeaders` | `boolean` / `true` | Set `Cache-Control: no-store` on API responses. |
 
+API notes:
+- `api.apps` contains app names from `settings.apps`, not URL paths.
+- Marking an app as API does not generate REST routes or change the app file structure. It only applies API middleware to that app mount.
+- The effective API mount comes from `settings.apps[].mount` (or `/${app}` by default). Keep that aligned with your `route.use(...)` mount when `autoMountApps` is off.
+
 ### Auth (`auth`)
 
 | Key | Type / Default | Description |
@@ -1073,25 +1104,143 @@ Important behavior:
 - For API mounts, multipart is allowed only when `uploads.allowApiMultipart=true`.
 - For non-API form submissions, CSRF token is required by default.
 
-## API Apps In Settings
+## API Apps
 
-After `createapp`, declare which apps are API apps in `settings.js`:
+`api` does not create a separate app type. You still build a normal AegisNode app with `routes.js`, `views.js`, `services.js`, and `validators.js`.
+The `api` setting only changes middleware behavior for selected app mounts.
+
+Think of it this way:
+- `api` controls request/response behavior for an app mount.
+- `auth` controls who can access routes and how tokens are issued/verified.
+- You can use `api` without auth, auth without `api`, or both together.
+
+Common combinations:
+- `api` only: public or internal JSON endpoints with no token auth.
+- `api` + JWT: first-party SPA/mobile/frontend calling your own backend.
+- `api` + OAuth2: third-party clients, machine-to-machine access, or standards-based authorization flows.
+
+Quick start:
+
+1. Declare the app in `settings.apps` and give it a mount.
+2. Add that app name to `api.apps`.
+3. Mount the app at the same path in `routes.js` when `autoMountApps` is off.
+4. Return JSON from your handlers.
+5. Send JSON for unsafe methods unless you intentionally allow multipart uploads.
+
+Example `settings.js`:
 
 ```js
-api: {
-  apps: ['users', 'auth'],
-  disableCsrf: true,
-  requireJsonForUnsafeMethods: true,
-  noStoreHeaders: true,
-},
+export default {
+  apps: [
+    { name: 'users', mount: '/users' },
+  ],
+  api: {
+    apps: ['users'],
+    disableCsrf: true,
+    requireJsonForUnsafeMethods: true,
+    noStoreHeaders: true,
+  },
+};
 ```
 
-What this enables:
-- API middleware is applied to configured app mounts.
-- Unsafe methods (`POST/PUT/PATCH/DELETE`) with body must be `application/json` (`415` otherwise).
-- `multipart/form-data` uploads are allowed on API mounts when `uploads.allowApiMultipart: true` (default).
-- CSRF checks are skipped only for these API app mounts when `disableCsrf: true`.
-- `Cache-Control: no-store` is added on API responses.
+Example root `routes.js`:
+
+```js
+import users from './apps/users/routes.js';
+
+export default {
+  register(route) {
+    route.use('/users', users); // keep this aligned with settings.apps[].mount
+  },
+};
+```
+
+Example `apps/users/routes.js`:
+
+```js
+import UsersView from './views.js';
+
+export default {
+  appName: 'users',
+  register(route) {
+    route.get('/', UsersView.index);
+    route.post('/', UsersView.create);
+  },
+};
+```
+
+Example `apps/users/views.js`:
+
+```js
+class UsersView {
+  static async index({ service }, req, res, next) {
+    try {
+      const users = await service.list();
+      res.json({ data: users });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async create({ service, validator }, req, res, next) {
+    try {
+      const payload = validator.create(req.body || {});
+      const created = await service.create(payload);
+      res.status(201).json({ data: created });
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+
+export default UsersView;
+```
+
+Example requests:
+
+```bash
+curl http://127.0.0.1:3000/users
+
+curl -X POST http://127.0.0.1:3000/users \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Alice"}'
+```
+
+What the API middleware changes:
+- `POST`, `PUT`, `PATCH`, and `DELETE` with a request body must use `application/json` when `requireJsonForUnsafeMethods: true`.
+- `multipart/form-data` is still allowed for API mounts when `uploads.allowApiMultipart: true`.
+- CSRF is skipped only for configured API app mounts when `disableCsrf: true`.
+- API responses get `Cache-Control: no-store` when `noStoreHeaders: true`.
+
+What it does not change:
+- It does not auto-generate CRUD endpoints.
+- It does not force a separate `controllers/` or `api/` folder.
+- It does not convert a view into JSON automatically; your handler still decides what to return.
+
+## API And Auth Together
+
+`api` and `auth` are separate features that are often used together:
+
+- `api` makes an app behave like an API mount: JSON body enforcement, optional CSRF skip, and `Cache-Control: no-store`.
+- `auth` adds token issuance, token verification, route protection, client registration, and revocation/introspection behavior.
+
+Examples:
+- Public JSON API: enable `api`, leave `auth.enabled` off.
+- Protected JSON API for your own frontend/mobile app: enable `api` and `auth.provider = 'jwt'`.
+- Protected partner/developer API: enable `api` and `auth.provider = 'oauth2'`.
+
+Rule of thumb:
+- If you only need JSON routes, use `api`.
+- If you need authenticated access, add `auth`.
+- If outside clients need a standard auth protocol, choose OAuth2 instead of rolling custom JWT login flows.
+
+Quick comparison:
+
+| Setup | Use it when | What you configure |
+| --- | --- | --- |
+| `api` only | You need JSON endpoints without token auth. Good for public read APIs or trusted internal services. | `api.apps = [...]` |
+| `api` + JWT | Your own frontend/mobile app talks to your backend and you control both sides. | `api.apps = [...]`, `auth.enabled = true`, `auth.provider = 'jwt'`, plus your own login/token routes |
+| `api` + OAuth2 | External clients, partner apps, or machine clients need standard token flows. | `api.apps = [...]`, `auth.enabled = true`, `auth.provider = 'oauth2'` |
 
 ## Database Config
 
@@ -1196,6 +1345,24 @@ Behavior:
 
 ## Auth (JWT Or OAuth2)
 
+`auth` is independent from `api`.
+You can protect normal web routes, API routes, or both.
+If your app is already listed in `api.apps`, adding `auth` simply means those JSON routes can now require tokens.
+
+Choose the provider based on who is calling your app:
+
+- `provider: 'jwt'`
+  Best for first-party apps you control.
+  You create your own login/token/refresh/logout routes and call `auth.issue(...)` yourself.
+- `provider: 'oauth2'`
+  Best when you need a standard authorization server.
+  AegisNode mounts `/oauth/*` endpoints for you and supports `authorization_code` + PKCE, `client_credentials`, and `refresh_token`.
+
+Quick decision guide:
+- Use JWT when your own frontend/mobile app talks only to your backend.
+- Use OAuth2 when external clients, partner apps, or machine-to-machine integrations need standard token flows.
+- Use `auth.middleware()` to protect routes in both modes.
+
 Enable auth in `settings.js`:
 
 ```js
@@ -1267,6 +1434,10 @@ Restart behavior:
 
 JWT usage in routes:
 
+- JWT does not create login routes for you.
+- You define the endpoints that authenticate users and issue tokens.
+- This is usually the simplest choice for a private API used only by your own frontend/mobile app.
+
 ```js
 export default {
   register(route) {
@@ -1298,6 +1469,11 @@ Flows supported:
 - `client_credentials`
 - `refresh_token`
 
+OAuth2 is the better choice when:
+- you need standards-based client registration and token exchange,
+- you need machine clients as well as browser/mobile clients,
+- or third parties must integrate without depending on your custom JWT login route shape.
+
 ### Route Usage (JWT vs OAuth2)
 
 `startproject` gives you one root route file: `routes.js`.
@@ -1324,6 +1500,14 @@ How this behaves:
 - `provider: 'jwt'`: Aegis does not create JWT endpoints automatically. You define login/token/refresh/logout routes yourself in `routes.js` (or mounted app routes).
 - `provider: 'oauth2'`: Aegis auto-mounts OAuth2 server endpoints (`/oauth/authorize`, `/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, metadata). You only define your own extra routes (for example admin client setup, protected APIs, business routes).
 - Do not reuse built-in OAuth2 endpoint paths for your own handlers when OAuth2 server is enabled.
+
+Typical setup patterns:
+- API + JWT:
+  `api.apps = ['users']`, `auth.provider = 'jwt'`, custom `/auth/login`, protect `/users/*` with `req.aegis.auth.middleware()`.
+- API + OAuth2:
+  `api.apps = ['users']`, `auth.provider = 'oauth2'`, use built-in `/oauth/token`, protect `/users/*` with `req.aegis.auth.middleware()`.
+- Web app + JWT:
+  no `api` block required if routes are normal form/web routes, but you can still use JWT for selected endpoints.
 
 ### OAuth2 Full Usage
 
