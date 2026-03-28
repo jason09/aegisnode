@@ -1,7 +1,7 @@
 {
   "name": "aegisnode",
-  "version": "0.1.0",
-  "description": "A modular Node.js framework with CLI scaffolding, view-first routing, context-injected handlers, DI/events, and SQL/NoSQL support.",
+  "version": "0.0.3",
+  "description": "A view-first Node.js framework for modular web apps and JSON APIs with CLI scaffolding, runtime injection, auth, uploads, i18n, mail, and WebSocket support.",
   "type": "module",
   "main": "./src/index.js",
   "exports": {
@@ -22,15 +22,26 @@
     "README.md"
   ],
   "keywords": [
+    "aegisnode",
+    "modular",
     "framework",
     "nodejs",
+    "express",
+    "web-framework",
+    "api",
     "cli",
-    "di",
-    "events",
-    "querymesh",
+    "scaffolding",
+    "dependency-injection",
+    "i18n",
+    "auth",
+    "uploads",
     "websocket"
   ],
-  "author": "",
+  "author": "jason90 <sidiki90@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jason09/aegisnode.git"
+  },
   "license": "MIT",
   "dependencies": {
     "ejs": "^3.1.10",

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AegisNode Docs - Foundation Settings</title>
+    <meta name="description" content="Top-level, HTTPS, logging, and environment override settings for AegisNode." />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <p class="eyebrow">AegisNode</p>
+          <h1>Docs</h1>
+          <p class="brand-copy">Multi-page HTML documentation using a forum app as the running example.</p>
+          <a class="readme-link" href="../README.md">Open full README</a>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Documentation pages">
+          <div class="nav-group">
+            <p class="nav-title">Start</p>
+            <a href="./index.html">Overview</a>
+            <a href="./quick-start.html">Quick Start</a>
+            <a href="./deployment.html">Deployment</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Core</p>
+            <a href="./app-structure.html#project-shape">Project Shape</a>
+            <a href="./app-structure.html#runtime-injection">Runtime Injection</a>
+            <a class="current" href="./settings-foundation.html#top-level">Top-Level Settings</a>
+            <a class="current" href="./settings-foundation.html#https">HTTPS</a>
+            <a class="current" href="./settings-foundation.html#logging">Logging</a>
+            <a class="current" href="./settings-foundation.html#environments">Environment Overrides</a>
+            <a href="./settings-architecture.html#architecture">Architecture</a>
+            <a href="./settings-architecture.html#auto-mount">Auto Mount</a>
+            <a href="./settings-architecture.html#loaders">Loaders</a>
+            <a href="./settings-architecture.html#apps">Apps</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Features</p>
+            <a href="./settings-platform.html#maintenance">Maintenance Mode</a>
+            <a href="./settings-ui.html#templates">Templates</a>
+            <a href="./settings-ui.html#i18n">Internationalization</a>
+            <a href="./settings-ui.html#helpers">Helpers &amp; jlive</a>
+            <a href="./settings-platform.html#security">Security</a>
+            <a href="./settings-platform.html#database">Database</a>
+            <a href="./settings-platform.html#cache">Cache</a>
+            <a href="./settings-platform.html#websocket">WebSocket</a>
+            <a href="./settings-platform.html#uploads">Uploads</a>
+            <a href="./settings-platform.html#mail">Mail</a>
+            <a href="./settings-api.html#api">API Apps</a>
+            <a href="./settings-api.html#auth">Auth</a>
+            <a href="./settings-api.html#swagger">Swagger</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Runtime</p>
+            <a href="./runtime-patterns.html#middleware">Middleware</a>
+            <a href="./runtime-patterns.html#validators">Validators</a>
+            <a href="./runtime-patterns.html#strict-layers">Strict Layers</a>
+            <a href="./runtime-patterns.html#subscribers">Subscribers</a>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <p class="eyebrow">Foundation Settings</p>
+          <h2>Configure the forum app host, port, HTTPS behavior, logging, and environment-specific overrides.</h2>
+          <p class="hero-copy">
+            These settings define how the application boots and how it behaves across development, staging, and
+            production.
+          </p>
+        </section>
+
+        <section class="doc-section" id="top-level">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Top-Level Settings</h2>
+          </div>
+          <p>The top-level config describes the forum app identity, runtime env, network binding, proxy trust, and declared apps.</p>
+          <pre><code>export default {
+  appName: 'forum',
+  env: process.env.NODE_ENV || 'development',
+  host: process.env.HOST || '0.0.0.0',
+  port: process.env.PORT ? Number(process.env.PORT) : 3000,
+  trustProxy: false,
+  staticDir: 'public',
+  apps: [
+    { name: 'forums', mount: '/forums' },
+    { name: 'threads', mount: '/threads' },
+    { name: 'users', mount: '/users' },
+  ],
+};</code></pre>
+        </section>
+
+        <section class="doc-section" id="https">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>HTTPS</h2>
+          </div>
+          <p>Use direct HTTPS only when Node itself should terminate TLS. If a proxy or hosting panel handles HTTPS, keep this off and set <code>trustProxy</code> instead.</p>
+          <pre><code>https: {
+  enabled: true,
+  keyPath: 'certs/forum-key.pem',
+  certPath: 'certs/forum-cert.pem',
+  options: {
+    minVersion: 'TLSv1.2',
+  },
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="logging">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Logging</h2>
+          </div>
+          <p>Control log verbosity globally. For a forum app, a common pattern is verbose logs in development and quieter logs in production.</p>
+          <pre><code>logging: {
+  level: process.env.LOG_LEVEL || 'info',
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="environments">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Environment Overrides</h2>
+          </div>
+          <p>Keep one <code>settings.js</code> and let <code>environments.default</code> plus <code>environments[env]</code> refine config per environment.</p>
+          <pre><code>environments: {
+  default: {
+    logging: { level: 'info' },
+  },
+  development: {
+    logging: { level: 'debug' },
+  },
+  production: {
+    host: '127.0.0.1',
+    logging: { level: 'warn' },
+    trustProxy: 1,
+  },
+}</code></pre>
+        </section>
+
+        <div class="page-nav">
+          <a href="./app-structure.html">Back to App Structure</a>
+          <a href="./settings-ui.html">Next: UI &amp; Content Settings</a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

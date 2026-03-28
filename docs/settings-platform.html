@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AegisNode Docs - Platform Settings</title>
+    <meta
+      name="description"
+      content="Maintenance, security, database, cache, websocket, uploads, and mail settings for AegisNode."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <p class="eyebrow">AegisNode</p>
+          <h1>Docs</h1>
+          <p class="brand-copy">Multi-page HTML documentation using a forum app as the running example.</p>
+          <a class="readme-link" href="../README.md">Open full README</a>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Documentation pages">
+          <div class="nav-group">
+            <p class="nav-title">Start</p>
+            <a href="./index.html">Overview</a>
+            <a href="./quick-start.html">Quick Start</a>
+            <a href="./deployment.html">Deployment</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Core</p>
+            <a href="./app-structure.html#project-shape">Project Shape</a>
+            <a href="./app-structure.html#runtime-injection">Runtime Injection</a>
+            <a href="./settings-foundation.html#top-level">Top-Level Settings</a>
+            <a href="./settings-foundation.html#https">HTTPS</a>
+            <a href="./settings-foundation.html#logging">Logging</a>
+            <a href="./settings-foundation.html#environments">Environment Overrides</a>
+            <a href="./settings-architecture.html#architecture">Architecture</a>
+            <a href="./settings-architecture.html#auto-mount">Auto Mount</a>
+            <a href="./settings-architecture.html#loaders">Loaders</a>
+            <a href="./settings-architecture.html#apps">Apps</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Features</p>
+            <a class="current" href="./settings-platform.html#maintenance">Maintenance Mode</a>
+            <a href="./settings-ui.html#templates">Templates</a>
+            <a href="./settings-ui.html#i18n">Internationalization</a>
+            <a href="./settings-ui.html#helpers">Helpers &amp; jlive</a>
+            <a class="current" href="./settings-platform.html#security">Security</a>
+            <a class="current" href="./settings-platform.html#database">Database</a>
+            <a class="current" href="./settings-platform.html#cache">Cache</a>
+            <a class="current" href="./settings-platform.html#websocket">WebSocket</a>
+            <a class="current" href="./settings-platform.html#uploads">Uploads</a>
+            <a class="current" href="./settings-platform.html#mail">Mail</a>
+            <a href="./settings-api.html#api">API Apps</a>
+            <a href="./settings-api.html#auth">Auth</a>
+            <a href="./settings-api.html#swagger">Swagger</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Runtime</p>
+            <a href="./runtime-patterns.html#middleware">Middleware</a>
+            <a href="./runtime-patterns.html#validators">Validators</a>
+            <a href="./runtime-patterns.html#strict-layers">Strict Layers</a>
+            <a href="./runtime-patterns.html#subscribers">Subscribers</a>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <p class="eyebrow">Platform Settings</p>
+          <h2>Control how the forum runs in production: protection, persistence, uploads, real-time events, and email.</h2>
+          <p class="hero-copy">
+            These settings shape the runtime platform around the forum app. Use them to decide how the app behaves
+            when traffic spikes, how files are stored, how messages are delivered, and how maintenance windows are
+            handled.
+          </p>
+        </section>
+
+        <section class="doc-section" id="maintenance">
+          <div class="section-heading">
+            <p class="eyebrow">Feature</p>
+            <h2>Maintenance Mode</h2>
+          </div>
+          <p>
+            Maintenance mode is useful when the forum needs a schema migration or a planned deployment window. You can
+            show a custom route first and fall back to the built-in maintenance view when that route is missing.
+          </p>
+          <pre><code>export default {
+  maintenance: {
+    enabled: true,
+    route: '/maintenance',
+    excludePaths: ['/health', '/openapi.json'],
+    retryAfter: 600,
+  },
+};</code></pre>
+          <pre><code>// routes.js
+route.get('/maintenance', (req, res) =&gt; {
+  res.status(503).render('maintenance', {
+    title: 'Forum upgrade in progress',
+    eta: '10 minutes',
+  });
+});</code></pre>
+        </section>
+
+        <section class="doc-section" id="security">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Security</h2>
+          </div>
+          <p>
+            The security block bundles Helmet headers, CSP, rate limiting, and CSRF settings. For a forum app, that
+            usually means allowing your CDN, limiting burst traffic, and protecting write actions such as creating
+            threads or replies.
+          </p>
+          <pre><code>security: {
+  appSecret: process.env.APP_SECRET,
+  headers: {
+    enabled: true,
+    csp: {
+      directives: {
+        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        connectSrc: ["'self'", 'wss://forum.example.com'],
+      },
+    },
+  },
+  ddos: {
+    windowMs: 60000,
+    maxRequests: 120,
+    skipPaths: ['/health'],
+  },
+  csrf: {
+    enabled: true,
+    headerName: 'x-csrf-token',
+    sameSite: 'lax',
+  },
+}</code></pre>
+          <div class="callout">
+            If your forum sits behind Nginx or Passenger, set top-level <code>trustProxy</code> so rate limiting and
+            secure cookies use the real client address and protocol.
+          </div>
+        </section>
+
+        <section class="doc-section" id="database">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Database</h2>
+          </div>
+          <p>
+            Use the database block to connect the forum to Postgres, MySQL, SQLite, or Mongo. The example below uses
+            Postgres for threads, replies, and user records.
+          </p>
+          <pre><code>database: {
+  enabled: true,
+  dialect: 'pg',
+  config: {
+    host: process.env.DB_HOST || '127.0.0.1',
+    port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 5432,
+    database: process.env.DB_NAME || 'forum',
+    user: process.env.DB_USER || 'forum',
+    password: process.env.DB_PASSWORD || '',
+  },
+}</code></pre>
+          <pre><code>class ThreadsModel {
+  constructor({ dbClient }) {
+    this.db = dbClient;
+  }
+
+  latest(limit = 20) {
+    return this.db('threads').select('*').orderBy('updated_at', 'desc').limit(limit);
+  }
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="cache">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Cache</h2>
+          </div>
+          <p>
+            Cache is useful for forum home-page summaries, category counts, and other repeated reads that do not need a
+            fresh database query every time.
+          </p>
+          <pre><code>cache: {
+  enabled: true,
+  driver: 'memory',
+  options: {},
+}</code></pre>
+          <pre><code>class ForumsService {
+  constructor({ cache, model }) {
+    this.cache = cache;
+    this.model = model;
+  }
+
+  async stats() {
+    const key = 'forums:stats';
+    const cached = await this.cache.get(key);
+    if (cached) return cached;
+
+    const stats = await this.model.stats();
+    await this.cache.set(key, stats, 60);
+    return stats;
+  }
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="websocket">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>WebSocket</h2>
+          </div>
+          <p>
+            Enable WebSocket support when the forum needs live thread updates, moderation notifications, or typing
+            indicators. The built-in runtime uses Socket.IO.
+          </p>
+          <pre><code>websocket: {
+  enabled: true,
+  cors: {
+    origin: ['https://forum.example.com'],
+    credentials: true,
+  },
+}</code></pre>
+          <pre><code>class ThreadsSubscriber {
+  constructor({ events, io }) {
+    this.events = events;
+    this.io = io;
+  }
+
+  register() {
+    this.events.on('threads.created', (thread) =&gt; {
+      this.io.emit('threads:created', thread);
+    });
+  }
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="uploads">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Uploads</h2>
+          </div>
+          <p>
+            Use uploads for forum attachments such as screenshots, PDFs, or avatar images. The config controls file
+            limits, MIME checks, and where uploaded files are written.
+          </p>
+          <pre><code>uploads: {
+  enabled: true,
+  dir: 'storage/uploads',
+  maxFileSize: '10mb',
+  maxFiles: 3,
+  allowedMimeTypes: ['image/jpeg', 'image/png', 'application/pdf'],
+  allowedExtensions: ['.jpg', '.jpeg', '.png', '.pdf'],
+}</code></pre>
+          <pre><code>// routes.js
+route.upload('post', '/threads/:id/attachments', {
+  fieldName: 'attachments',
+  maxFiles: 3,
+}, ThreadsView.attachFiles);</code></pre>
+        </section>
+
+        <section class="doc-section" id="mail">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Mail</h2>
+          </div>
+          <p>
+            Mail covers forum notifications such as welcome emails, password reset flows, and moderator alerts. The
+            built-in mail manager uses Nodemailer and is available through dependency injection.
+          </p>
+          <pre><code>mail: {
+  enabled: true,
+  defaults: {
+    from: 'Forum &lt;noreply@forum.example.com&gt;',
+    replyTo: 'support@forum.example.com',
+  },
+  transport: {
+    host: process.env.SMTP_HOST || '127.0.0.1',
+    port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 1025,
+    secure: false,
+  },
+}</code></pre>
+          <pre><code>class UsersService {
+  constructor({ mail, i18n }) {
+    this.mail = mail;
+    this.i18n = i18n;
+  }
+
+  async sendWelcome(user) {
+    await this.mail.send({
+      to: user.email,
+      subject: this.i18n.t('mail.welcome.subject'),
+      text: `Welcome to the forum, ${user.displayName}.`,
+    });
+  }
+}</code></pre>
+        </section>
+
+        <div class="page-nav">
+          <a href="./settings-ui.html">Back to UI &amp; Content Settings</a>
+          <a href="./settings-api.html">Next: API &amp; Auth</a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AegisNode Docs - Deployment</title>
+    <meta
+      name="description"
+      content="Deployment and startup guidance for AegisNode, including development and production entrypoints."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <p class="eyebrow">AegisNode</p>
+          <h1>Docs</h1>
+          <p class="brand-copy">Multi-page HTML documentation using a forum app as the running example.</p>
+          <a class="readme-link" href="../README.md">Open full README</a>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Documentation pages">
+          <div class="nav-group">
+            <p class="nav-title">Start</p>
+            <a href="./index.html">Overview</a>
+            <a href="./quick-start.html">Quick Start</a>
+            <a class="current" href="./deployment.html">Deployment</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Core</p>
+            <a href="./app-structure.html#project-shape">Project Shape</a>
+            <a href="./app-structure.html#runtime-injection">Runtime Injection</a>
+            <a href="./settings-foundation.html#top-level">Top-Level Settings</a>
+            <a href="./settings-foundation.html#https">HTTPS</a>
+            <a href="./settings-foundation.html#logging">Logging</a>
+            <a href="./settings-foundation.html#environments">Environment Overrides</a>
+            <a href="./settings-architecture.html#architecture">Architecture</a>
+            <a href="./settings-architecture.html#auto-mount">Auto Mount</a>
+            <a href="./settings-architecture.html#loaders">Loaders</a>
+            <a href="./settings-architecture.html#apps">Apps</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Features</p>
+            <a href="./settings-platform.html#maintenance">Maintenance Mode</a>
+            <a href="./settings-ui.html#templates">Templates</a>
+            <a href="./settings-ui.html#i18n">Internationalization</a>
+            <a href="./settings-ui.html#helpers">Helpers &amp; jlive</a>
+            <a href="./settings-platform.html#security">Security</a>
+            <a href="./settings-platform.html#database">Database</a>
+            <a href="./settings-platform.html#cache">Cache</a>
+            <a href="./settings-platform.html#websocket">WebSocket</a>
+            <a href="./settings-platform.html#uploads">Uploads</a>
+            <a href="./settings-platform.html#mail">Mail</a>
+            <a href="./settings-api.html#api">API Apps</a>
+            <a href="./settings-api.html#auth">Auth</a>
+            <a href="./settings-api.html#swagger">Swagger</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Runtime</p>
+            <a href="./runtime-patterns.html#middleware">Middleware</a>
+            <a href="./runtime-patterns.html#validators">Validators</a>
+            <a href="./runtime-patterns.html#strict-layers">Strict Layers</a>
+            <a href="./runtime-patterns.html#subscribers">Subscribers</a>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <p class="eyebrow">Deployment</p>
+          <h2>Run the forum correctly in development and production with the expected AegisNode entrypoint.</h2>
+          <p class="hero-copy">
+            Startup mode is now enforced. The framework expects one launcher in development and a different one outside
+            development, so your docs and deploy scripts should match that contract.
+          </p>
+        </section>
+
+        <section class="doc-section" id="development">
+          <div class="section-heading">
+            <p class="eyebrow">Mode</p>
+            <h2>Development Startup</h2>
+          </div>
+          <p>
+            In development, use the CLI server command. It is the only allowed launcher in development mode.
+          </p>
+          <pre><code>NODE_ENV=development aegisnode runserver --project forum</code></pre>
+          <div class="callout">
+            <strong>Rejected in development:</strong> <code>node app.js</code> and <code>node loader.cjs</code>.
+          </div>
+        </section>
+
+        <section class="doc-section" id="production">
+          <div class="section-heading">
+            <p class="eyebrow">Mode</p>
+            <h2>Production Startup</h2>
+          </div>
+          <p>
+            In production or staging, use the generated CommonJS loader. This is the stable entrypoint for process
+            managers and hosting panels.
+          </p>
+          <pre><code>NODE_ENV=production node loader.cjs</code></pre>
+          <div class="callout">
+            <strong>Rejected outside development:</strong> <code>aegisnode runserver</code>.
+          </div>
+        </section>
+
+        <section class="doc-section" id="passenger">
+          <div class="section-heading">
+            <p class="eyebrow">Hosting</p>
+            <h2>Phusion Passenger And Reverse Proxies</h2>
+          </div>
+          <p>
+            Passenger and similar platforms typically terminate HTTPS before the Node process. In that case, keep direct
+            HTTPS disabled and trust the proxy hop that sits in front of the forum app.
+          </p>
+          <pre><code>export default {
+  env: 'production',
+  host: '127.0.0.1',
+  port: 3000,
+  trustProxy: 1,
+  https: {
+    enabled: false,
+  },
+};</code></pre>
+        </section>
+
+        <section class="doc-section" id="package-scripts">
+          <div class="section-heading">
+            <p class="eyebrow">Project Scripts</p>
+            <h2>Recommended Scripts</h2>
+          </div>
+          <p>Keep the project scripts aligned with the enforced launcher rules.</p>
+          <pre><code>{
+  "scripts": {
+    "dev": "aegisnode runserver",
+    "start": "node loader.cjs"
+  }
+}</code></pre>
+        </section>
+
+        <div class="page-nav">
+          <a href="./runtime-patterns.html">Back to Runtime Patterns</a>
+          <a href="./index.html">Return to Overview</a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

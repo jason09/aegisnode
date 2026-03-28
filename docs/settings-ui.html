@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AegisNode Docs - UI &amp; Content Settings</title>
+    <meta name="description" content="Templates, internationalization, and helpers settings for AegisNode." />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <p class="eyebrow">AegisNode</p>
+          <h1>Docs</h1>
+          <p class="brand-copy">Multi-page HTML documentation using a forum app as the running example.</p>
+          <a class="readme-link" href="../README.md">Open full README</a>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Documentation pages">
+          <div class="nav-group">
+            <p class="nav-title">Start</p>
+            <a href="./index.html">Overview</a>
+            <a href="./quick-start.html">Quick Start</a>
+            <a href="./deployment.html">Deployment</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Core</p>
+            <a href="./app-structure.html#project-shape">Project Shape</a>
+            <a href="./app-structure.html#runtime-injection">Runtime Injection</a>
+            <a href="./settings-foundation.html#top-level">Top-Level Settings</a>
+            <a href="./settings-foundation.html#https">HTTPS</a>
+            <a href="./settings-foundation.html#logging">Logging</a>
+            <a href="./settings-foundation.html#environments">Environment Overrides</a>
+            <a href="./settings-architecture.html#architecture">Architecture</a>
+            <a href="./settings-architecture.html#auto-mount">Auto Mount</a>
+            <a href="./settings-architecture.html#loaders">Loaders</a>
+            <a href="./settings-architecture.html#apps">Apps</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Features</p>
+            <a href="./settings-platform.html#maintenance">Maintenance Mode</a>
+            <a class="current" href="./settings-ui.html#templates">Templates</a>
+            <a class="current" href="./settings-ui.html#i18n">Internationalization</a>
+            <a class="current" href="./settings-ui.html#helpers">Helpers &amp; jlive</a>
+            <a href="./settings-platform.html#security">Security</a>
+            <a href="./settings-platform.html#database">Database</a>
+            <a href="./settings-platform.html#cache">Cache</a>
+            <a href="./settings-platform.html#websocket">WebSocket</a>
+            <a href="./settings-platform.html#uploads">Uploads</a>
+            <a href="./settings-platform.html#mail">Mail</a>
+            <a href="./settings-api.html#api">API Apps</a>
+            <a href="./settings-api.html#auth">Auth</a>
+            <a href="./settings-api.html#swagger">Swagger</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Runtime</p>
+            <a href="./runtime-patterns.html#middleware">Middleware</a>
+            <a href="./runtime-patterns.html#validators">Validators</a>
+            <a href="./runtime-patterns.html#strict-layers">Strict Layers</a>
+            <a href="./runtime-patterns.html#subscribers">Subscribers</a>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <p class="eyebrow">UI &amp; Content Settings</p>
+          <h2>Render forum pages, localize labels, and format values consistently.</h2>
+          <p class="hero-copy">
+            These settings shape the public-facing experience of the forum app: layout rendering, translated text,
+            and formatting helpers used in templates and handlers.
+          </p>
+        </section>
+
+        <section class="doc-section" id="templates">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Templates</h2>
+          </div>
+          <p>Use EJS templates with a base layout and optional per-app base overrides. This works well for a forum home page, thread pages, and an admin interface.</p>
+          <pre><code>templates: {
+  enabled: true,
+  engine: 'ejs',
+  dir: 'templates',
+  base: 'base',
+  appBases: {
+    forums: 'forums/base',
+    users: 'users/base',
+  },
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="i18n">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Internationalization</h2>
+          </div>
+          <p>Forum UIs often need translated menu labels, button text, and validation messages. AegisNode provides locale detection and translation helpers.</p>
+          <pre><code>i18n: {
+  enabled: true,
+  defaultLocale: 'en',
+  fallbackLocale: 'en',
+  supported: ['en', 'fr'],
+  translations: {
+    en: 'locales/en.json',
+    fr: 'locales/fr.json',
+  },
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="helpers">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Helpers Defaults</h2>
+          </div>
+          <p>Helpers keep date, number, and money formatting consistent throughout the forum UI and admin tools.</p>
+          <pre><code>helpers: {
+  locale: 'en-US',
+  money: {
+    currency: 'USD',
+    currencyDisplay: 'symbol',
+  },
+}</code></pre>
+          <pre><code>route.get('/threads/:id', (req, res) => {
+  res.render('threads/show', {
+    score: req.aegis.helpers.number(15230),
+    updatedAgo: req.aegis.helpers.timeElapsed(Date.now() - 3600000),
+  });
+});</code></pre>
+        </section>
+
+        <div class="page-nav">
+          <a href="./settings-foundation.html">Back to Foundation Settings</a>
+          <a href="./settings-platform.html">Next: Platform Settings</a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

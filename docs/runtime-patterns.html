@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AegisNode Docs - Runtime Patterns</title>
+    <meta
+      name="description"
+      content="Middleware, validators, strict layers, and subscribers patterns for AegisNode."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <p class="eyebrow">AegisNode</p>
+          <h1>Docs</h1>
+          <p class="brand-copy">Multi-page HTML documentation using a forum app as the running example.</p>
+          <a class="readme-link" href="../README.md">Open full README</a>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Documentation pages">
+          <div class="nav-group">
+            <p class="nav-title">Start</p>
+            <a href="./index.html">Overview</a>
+            <a href="./quick-start.html">Quick Start</a>
+            <a href="./deployment.html">Deployment</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Core</p>
+            <a href="./app-structure.html#project-shape">Project Shape</a>
+            <a href="./app-structure.html#runtime-injection">Runtime Injection</a>
+            <a href="./settings-foundation.html#top-level">Top-Level Settings</a>
+            <a href="./settings-foundation.html#https">HTTPS</a>
+            <a href="./settings-foundation.html#logging">Logging</a>
+            <a href="./settings-foundation.html#environments">Environment Overrides</a>
+            <a href="./settings-architecture.html#architecture">Architecture</a>
+            <a href="./settings-architecture.html#auto-mount">Auto Mount</a>
+            <a href="./settings-architecture.html#loaders">Loaders</a>
+            <a href="./settings-architecture.html#apps">Apps</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Features</p>
+            <a href="./settings-platform.html#maintenance">Maintenance Mode</a>
+            <a href="./settings-ui.html#templates">Templates</a>
+            <a href="./settings-ui.html#i18n">Internationalization</a>
+            <a href="./settings-ui.html#helpers">Helpers &amp; jlive</a>
+            <a href="./settings-platform.html#security">Security</a>
+            <a href="./settings-platform.html#database">Database</a>
+            <a href="./settings-platform.html#cache">Cache</a>
+            <a href="./settings-platform.html#websocket">WebSocket</a>
+            <a href="./settings-platform.html#uploads">Uploads</a>
+            <a href="./settings-platform.html#mail">Mail</a>
+            <a href="./settings-api.html#api">API Apps</a>
+            <a href="./settings-api.html#auth">Auth</a>
+            <a href="./settings-api.html#swagger">Swagger</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Runtime</p>
+            <a class="current" href="./runtime-patterns.html#middleware">Middleware</a>
+            <a class="current" href="./runtime-patterns.html#validators">Validators</a>
+            <a class="current" href="./runtime-patterns.html#strict-layers">Strict Layers</a>
+            <a class="current" href="./runtime-patterns.html#subscribers">Subscribers</a>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <p class="eyebrow">Runtime Patterns</p>
+          <h2>Use consistent request flow, validation, and event wiring as the forum grows.</h2>
+          <p class="hero-copy">
+            These patterns are where the framework’s structure becomes practical. They help keep forum code maintainable
+            when thread creation, moderation, uploads, auth, and notifications all start interacting.
+          </p>
+        </section>
+
+        <section class="doc-section" id="middleware">
+          <div class="section-heading">
+            <p class="eyebrow">Pattern</p>
+            <h2>Middleware</h2>
+          </div>
+          <p>
+            Put cross-cutting concerns in middleware instead of pushing them into views. In a forum app this usually
+            means session hydration, request timing, moderation flags, or tenant resolution.
+          </p>
+          <pre><code>export default function forumContext(req, res, next) {
+  res.locals.currentUser = req.auth || null;
+  res.locals.isModerator = Boolean(req.auth?.roles?.includes('moderator'));
+  next();
+}</code></pre>
+          <pre><code>// routes.js
+import forumContext from './middleware/forum-context.js';
+
+export default {
+  register(route) {
+    route.use(forumContext);
+    route.use('/threads', threadsRoutes);
+  },
+};</code></pre>
+          <p>
+            Middleware can also receive injected runtime context. That is useful when the forum middleware needs
+            translation, logging, helpers, or auth utilities without importing framework internals.
+          </p>
+          <pre><code>async function attachForumLocals({ helpers, i18n, logger }, req, res, next) {
+  logger.info(`Forum request: ${req.method} ${req.originalUrl}`);
+  res.locals.t = i18n.t;
+  res.locals.formatNumber = helpers.number;
+  next();
+}
+
+export default {
+  register(route) {
+    const authGuard = (req, res, next) =&gt; req.aegis.auth.middleware()(req, res, next);
+
+    route.use(attachForumLocals);
+    route.get('/account', authGuard, UsersView.account);
+  },
+};</code></pre>
+          <div class="callout">
+            In AegisNode, a 4-argument middleware function means <code>(context, req, res, next)</code>, not Express
+            error middleware. Do not use <code>(err, req, res, next)</code> in route chains.
+          </div>
+        </section>
+
+        <section class="doc-section" id="validators">
+          <div class="section-heading">
+            <p class="eyebrow">Pattern</p>
+            <h2>Validators</h2>
+          </div>
+          <p>
+            Validators sit between the route/view layer and the service layer. They are the right place to normalize
+            and reject thread payloads before business logic runs.
+          </p>
+          <pre><code>class ThreadsValidator {
+  constructor({ i18n }) {
+    this.i18n = i18n;
+  }
+
+  create(input = {}) {
+    if (!input.title || input.title.trim().length &lt; 5) {
+      throw new Error(this.i18n.t('threads.validation.title_short'));
+    }
+
+    return {
+      title: input.title.trim(),
+      body: String(input.body || '').trim(),
+      forumId: Number(input.forumId),
+    };
+  }
+}</code></pre>
+        </section>
+
+        <section class="doc-section" id="strict-layers">
+          <div class="section-heading">
+            <p class="eyebrow">Pattern</p>
+            <h2>Strict Layers</h2>
+          </div>
+          <p>
+            Strict layers are most useful when the codebase gets large enough that shortcuts start to pile up. They
+            keep the forum flow explicit: views do request work, services do business rules, and models do persistence.
+          </p>
+          <pre><code>architecture: {
+  strictLayers: true,
+}</code></pre>
+          <pre><code>// good
+const payload = validator.create(req.body);
+const thread = await service.createThread(payload, req.auth?.sub);
+
+// avoid
+await model.create(req.body, req.auth?.sub);</code></pre>
+        </section>
+
+        <section class="doc-section" id="subscribers">
+          <div class="section-heading">
+            <p class="eyebrow">Pattern</p>
+            <h2>Subscribers</h2>
+          </div>
+          <p>
+            Subscribers react to events after the main request flow succeeds. In the forum app, that is a clean place
+            for activity logs, websocket pushes, and moderator notifications.
+          </p>
+          <pre><code>class ThreadsSubscriber {
+  constructor({ events, mail, i18n }) {
+    this.events = events;
+    this.mail = mail;
+    this.i18n = i18n;
+  }
+
+  register() {
+    this.events.on('threads.created', async (thread) =&gt; {
+      await this.mail.send({
+        to: 'mods@forum.example.com',
+        subject: this.i18n.t('mail.moderation.subject'),
+        text: `New thread awaiting review: ${thread.title}`,
+      });
+    });
+  }
+}</code></pre>
+        </section>
+
+        <div class="page-nav">
+          <a href="./settings-architecture.html">Back to Architecture Settings</a>
+          <a href="./deployment.html">Next: Deployment</a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AegisNode Docs - Overview</title>
+    <meta
+      name="description"
+      content="Multi-page AegisNode documentation with a forum app example and sidebar navigation for framework features and settings."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <p class="eyebrow">AegisNode</p>
+          <h1>Docs</h1>
+          <p class="brand-copy">Multi-page HTML documentation using a forum app as the running example.</p>
+          <a class="readme-link" href="../README.md">Open full README</a>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Documentation pages">
+          <div class="nav-group">
+            <p class="nav-title">Start</p>
+            <a class="current" href="./index.html">Overview</a>
+            <a href="./quick-start.html">Quick Start</a>
+            <a href="./deployment.html">Deployment</a>
+          </div>
+
+          <div class="nav-group">
+            <p class="nav-title">Core</p>
+            <a href="./app-structure.html#project-shape">Project Shape</a>
+            <a href="./app-structure.html#runtime-injection">Runtime Injection</a>
+            <a href="./settings-foundation.html#top-level">Top-Level Settings</a>
+            <a href="./settings-foundation.html#https">HTTPS</a>
+            <a href="./settings-foundation.html#logging">Logging</a>
+            <a href="./settings-foundation.html#environments">Environment Overrides</a>
+            <a href="./settings-architecture.html#architecture">Architecture</a>
+            <a href="./settings-architecture.html#auto-mount">Auto Mount</a>
+            <a href="./settings-architecture.html#loaders">Loaders</a>
+            <a href="./settings-architecture.html#apps">Apps</a>
+          </div>
+
+          <div class="nav-group">
+            <p class="nav-title">Features</p>
+            <a href="./settings-platform.html#maintenance">Maintenance Mode</a>
+            <a href="./settings-ui.html#templates">Templates</a>
+            <a href="./settings-ui.html#i18n">Internationalization</a>
+            <a href="./settings-ui.html#helpers">Helpers &amp; jlive</a>
+            <a href="./settings-platform.html#security">Security</a>
+            <a href="./settings-platform.html#database">Database</a>
+            <a href="./settings-platform.html#cache">Cache</a>
+            <a href="./settings-platform.html#websocket">WebSocket</a>
+            <a href="./settings-platform.html#uploads">Uploads</a>
+            <a href="./settings-platform.html#mail">Mail</a>
+            <a href="./settings-api.html#api">API Apps</a>
+            <a href="./settings-api.html#auth">Auth</a>
+            <a href="./settings-api.html#swagger">Swagger</a>
+          </div>
+
+          <div class="nav-group">
+            <p class="nav-title">Runtime</p>
+            <a href="./runtime-patterns.html#middleware">Middleware</a>
+            <a href="./runtime-patterns.html#validators">Validators</a>
+            <a href="./runtime-patterns.html#strict-layers">Strict Layers</a>
+            <a href="./runtime-patterns.html#subscribers">Subscribers</a>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <p class="eyebrow">Overview</p>
+          <h2>AegisNode documentation, organized by feature instead of one long page.</h2>
+          <p class="hero-copy">
+            This handbook uses a simple forum app as the example project. Across the pages you will see the same app
+            grow from a fresh scaffold into a modular application with templates, APIs, auth, uploads, mail, and
+            subscribers.
+          </p>
+          <div class="hero-grid">
+            <article>
+              <h3>Example app</h3>
+              <p>A forum project with <code>forums</code>, <code>threads</code>, and <code>users</code> apps.</p>
+            </article>
+            <article>
+              <h3>What each page does</h3>
+              <p>Every page explains a focused feature or settings group and includes working code examples.</p>
+            </article>
+            <article>
+              <h3>How to read it</h3>
+              <p>Start with Quick Start, then move to structure, settings, feature guides, and runtime patterns.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="doc-section" id="forum-example">
+          <div class="section-heading">
+            <p class="eyebrow">Example Project</p>
+            <h2>The Forum App Used In This Documentation</h2>
+          </div>
+          <p>
+            The docs assume a project named <code>forum</code>. It contains three apps:
+            <code>forums</code> for forum categories, <code>threads</code> for discussions, and
+            <code>users</code> for accounts and moderation helpers.
+          </p>
+          <pre><code>export default {
+  appName: 'forum',
+  apps: [
+    { name: 'forums', mount: '/forums' },
+    { name: 'threads', mount: '/threads' },
+    { name: 'users', mount: '/users' },
+  ],
+};</code></pre>
+          <div class="callout">
+            You can copy the examples directly and swap <code>forum</code>, <code>forums</code>, or
+            <code>threads</code> for your own app names.
+          </div>
+        </section>
+
+        <section class="doc-section" id="reading-path">
+          <div class="section-heading">
+            <p class="eyebrow">Reading Path</p>
+            <h2>Documentation Map</h2>
+          </div>
+          <div class="page-grid">
+            <a href="./quick-start.html">
+              <article>
+                <h3>Quick Start</h3>
+                <p>Create the forum project, generate apps, and understand development vs production startup.</p>
+              </article>
+            </a>
+            <a href="./app-structure.html">
+              <article>
+                <h3>App Structure</h3>
+                <p>Learn the project layout, app files, and runtime injection model.</p>
+              </article>
+            </a>
+            <a href="./settings-foundation.html">
+              <article>
+                <h3>Foundation Settings</h3>
+                <p>Top-level config, HTTPS, logging, and environment overrides.</p>
+              </article>
+            </a>
+            <a href="./settings-ui.html">
+              <article>
+                <h3>UI &amp; Content Settings</h3>
+                <p>Templates, internationalization, and helpers using forum-facing pages.</p>
+              </article>
+            </a>
+            <a href="./settings-platform.html">
+              <article>
+                <h3>Platform Settings</h3>
+                <p>Maintenance mode, security, database, cache, websocket, uploads, and mail.</p>
+              </article>
+            </a>
+            <a href="./settings-api.html">
+              <article>
+                <h3>API &amp; Auth</h3>
+                <p>API app behavior, JWT, OAuth2, and Swagger for a forum threads API.</p>
+              </article>
+            </a>
+            <a href="./settings-architecture.html">
+              <article>
+                <h3>Architecture</h3>
+                <p>Strict layers, auto-mounting, loaders, and app declarations.</p>
+              </article>
+            </a>
+            <a href="./runtime-patterns.html">
+              <article>
+                <h3>Runtime Patterns</h3>
+                <p>Middleware, validators, subscribers, and layer discipline.</p>
+              </article>
+            </a>
+            <a href="./deployment.html">
+              <article>
+                <h3>Deployment</h3>
+                <p>Run the forum app behind Passenger or another process manager with the correct entrypoint.</p>
+              </article>
+            </a>
+          </div>
+        </section>
+
+        <div class="page-nav">
+          <a href="./quick-start.html">Start with Quick Start</a>
+          <a href="./app-structure.html">Go to App Structure</a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

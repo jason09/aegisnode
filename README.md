@@ -20,6 +20,9 @@ If you are new to AegisNode, read this README in this order:
 - Full Settings Reference: use this as the complete config manual once you already know what feature you need.
 - Runtime Patterns And Advanced Topics: validators, strict layers, subscribers, and security details.
 
+Standalone HTML handbook:
+- Open `docs/index.html` in a browser for a sidebar-based documentation view.
+
 ## How AegisNode Helps
 
 AegisNode helps by standardizing the parts that usually consume time early in a project:
@@ -265,522 +268,6 @@ Notes:
 - `startproject` also writes a local `.env` with a generated `APP_SECRET`.
 - Add optional blocks manually only when needed: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `mail`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
-
-<!-- SETTINGS_REFERENCE_START -->
-## Full Settings Reference
-
-All fields below are supported in `settings.js`. If you omit a field, AegisNode uses the runtime default.
-
-Merge order used at startup:
-1. Framework defaults (`defaultConfig`)
-2. `settings.js`
-3. Legacy `settings/index.js` (if present)
-4. Legacy `settings/db.js` (merged into `database`)
-5. Legacy `settings/cache.js` (merged into `cache`)
-6. Legacy `settings/apps.js` (used only when `settings.js` does not define apps)
-7. `environments.default`
-8. `environments[env]` where `env = settings.env` (fallback `NODE_ENV`, then `development`)
-
-### Top-Level
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `appName` | `string` / folder name | Application name used in logs and defaults. |
-| `env` | `string` / `process.env.NODE_ENV || 'development'` | Active environment key for `environments` overrides. |
-| `host` | `string` / `process.env.HOST || '0.0.0.0'` | Bind host for HTTP server. |
-| `port` | `number` / `process.env.PORT || 3000` | Bind port for HTTP server. |
-| `trustProxy` | `boolean \| number \| string` / `false` | Express `trust proxy` value. Set this when HTTPS is terminated by a reverse proxy/load balancer. |
-| `https` | `object \| false` / see HTTPS table | Direct TLS server settings for Node-hosted HTTPS. |
-| `staticDir` | `string \| null` / `null` | Static assets directory, relative to project root (if set). |
-| `templates` | `object \| false` / see templates table | EJS template engine + layout settings. |
-| `i18n` | `object` / see i18n table | Built-in locale detection + translator bridge (`req.aegis.t`, injected `i18n.t`). |
-| `helpers` | `object` / see helpers table | Runtime helper defaults (for example currency/locale for `helpers.money`). |
-| `security` | `object` / see security tables | Security headers, DDoS limiter, CSRF settings, app secret. |
-| `logging` | `object` / `{ level: 'info' }` | Runtime logger level. |
-| `database` | `object` / see database table | SQL or MongoDB connection settings. |
-| `cache` | `object` / `{ enabled: true, driver: 'memory' }` | Cache backend settings. |
-| `websocket` | `object` / `{ enabled: true, cors: { origin: false } }` | Socket.IO server options. |
-| `uploads` | `object` / see uploads table | Built-in file upload middleware settings used by `route.upload`. |
-| `mail` | `object` / see mail table | Nodemailer-backed mail manager available as injected `mail` and `req.aegis.mail`. |
-| `api` | `object` / see API table | API-app middleware behavior (JSON enforcement, no-store, CSRF skip for API mounts). |
-| `auth` | `object` / see auth tables | JWT or OAuth2 provider settings. |
-| `swagger` | `object` / see swagger table | OpenAPI JSON + Swagger UI settings. |
-| `architecture` | `object` / `{ strictLayers: false }` | Layering enforcement mode. |
-| `autoMountApps` | `boolean` / `false` | Auto-mount each app route file from `settings.apps`. |
-| `loaders` | `array` / `[]` | Startup loaders run before routes mounting. |
-| `apps` | `array` / `[]` | Declared apps with mount points. |
-| `environments` | `object` / `{}` | Environment-specific deep overrides. |
-
-Notes:
-- `rootDir` is internal and set by runtime; do not manage it manually.
-- Arrays are replaced (not merged) during deep merge.
-
-### HTTPS (`https`)
-
-Use this only when Node should serve HTTPS directly. If HTTPS is handled by Passenger, Nginx, Apache, or another proxy, keep `https.enabled` off and set top-level `trustProxy` instead.
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `false` | Create an HTTPS server instead of HTTP. |
-| `key` | `string \| Buffer` / `null` | TLS private key content. |
-| `cert` | `string \| Buffer` / `null` | TLS certificate content. |
-| `ca` | `string \| Buffer \| array` / `null` | Optional CA/intermediate certificate content. |
-| `pfx` | `string \| Buffer` / `null` | PFX/PKCS#12 archive content. Use instead of `key` + `cert`. |
-| `keyPath` | `string` / `''` | Path to TLS private key, relative to project root or absolute. |
-| `certPath` | `string` / `''` | Path to TLS certificate, relative to project root or absolute. |
-| `caPath` | `string \| string[]` / `null` | Optional CA/intermediate certificate path(s). |
-| `pfxPath` | `string` / `''` | Path to PFX/PKCS#12 archive. |
-| `passphrase` | `string` / `''` | Optional passphrase for encrypted key/PFX files. |
-| `options` | `object` / `{}` | Extra Node `https.createServer` options (for example `minVersion`). |
-
-Direct HTTPS example:
-
-```js
-export default {
-  host: '0.0.0.0',
-  port: 3443,
-  https: {
-    enabled: true,
-    keyPath: 'certs/localhost-key.pem',
-    certPath: 'certs/localhost-cert.pem',
-    options: {
-      minVersion: 'TLSv1.2',
-    },
-  },
-};
-```
-
-Reverse-proxy HTTPS example:
-
-```js
-export default {
-  host: '127.0.0.1',
-  port: 3000,
-  trustProxy: 1,
-};
-```
-
-Notes:
-- `https` requires either `pfx`/`pfxPath` or both `key`/`keyPath` and `cert`/`certPath`.
-- Paths resolve from project root unless absolute.
-- `trustProxy` affects `req.secure`, `req.protocol`, secure cookies, and OAuth2 secure transport checks.
-- Prefer `1`, a subnet, or another exact Express `trust proxy` value instead of `true` when rate limiting is enabled.
-
-### Templates (`templates`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable template engine. |
-| `engine` | `string` / `'ejs'` | Template engine. Only `ejs` is supported. |
-| `dir` | `string` / `'templates'` | Templates folder (absolute or relative to project root). |
-| `base` | `string \| false \| null` / `'base'` | Default layout template (without `.ejs`). Set `false`/`null` to disable layout wrapping globally. |
-| `appBases` | `object` / `{}` | Per-app layout override map: `{ appName: 'layout/name' }`. Set app value to `false`/`null` to disable layout for that app only. |
-| `locals` | `object \| function` / `{}` | Global locals. If function, signature is `({ req, res, helpers, jlive, env }) => object`. |
-
-Layout notes:
-- `res.render('view', data)` renders `view.ejs` and wraps it with `base.ejs` (or configured layout).
-- Per-app layout override: `templates.appBases = { users: 'users/base', admin: 'admin/base' }`.
-- In layout, both `<%- body %>` and `<%- content %>` are available.
-- Per-render layout override: pass `layout: 'custom-layout'` or `layout: false` in locals.
-
-### Internationalization (`i18n`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `false` | Enable built-in i18n translator bridge. |
-| `defaultLocale` | `string` / `'en'` | Default locale used when detection fails. |
-| `fallbackLocale` | `string` / `'en'` | Fallback locale used when key is missing in active locale. |
-| `supported` | `string[]` / `['en']` | Allowed locales. Values normalize to lowercase (for example `en-US` -> `en-us`). |
-| `queryParam` | `string` / `'lang'` | Query parameter used for locale selection (for example `?lang=fr`). |
-| `cookieName` | `string` / `'aegis_locale'` | Cookie used to persist locale. |
-| `detectFromHeader` | `boolean` / `true` | Enable locale detection from `Accept-Language` header. |
-| `detectFromCookie` | `boolean` / `true` | Enable locale detection from configured cookie. |
-| `detectFromQuery` | `boolean` / `true` | Enable locale detection from query parameter. |
-| `translations` | `object` / `{}` | Translation map by locale. Values can be objects or JSON file paths: `{ en: { ... }, fr: 'locales/fr.json' }`. Alias keys `locales` and `messages` are also accepted. |
-| `translationsFile` | `string` / unset | Path to a JSON file containing all locales (example: `{ "en": {...}, "fr": {...} }`). Inline `translations` overrides file values for same locale keys. |
-
-i18n notes:
-- Detection order: query -> cookie -> `Accept-Language` -> `defaultLocale`.
-- Use dotted keys like `home.title`.
-- Placeholder interpolation supports `{name}` style tokens.
-- Relative JSON paths resolve from project root (`settings.js` location).
-- Injected `i18n` is available in handlers, services, models, validators, controllers, subscribers, and loaders. Use `i18n.t('key', vars, { locale })`.
-- During a request, injected `i18n.t(...)` follows the active request locale. Outside a request, it falls back to `defaultLocale`.
-
-### Helpers Defaults (`helpers`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `locale` | `string` / `'en-US'` | Default locale used by runtime helpers when locale is not passed explicitly. |
-| `money` | `object` / `{ currency: 'USD' }` | Default money formatting settings used by `helpers.money`. |
-| `money.currency` | `string` / `'USD'` | Default currency code for `helpers.money(amount)` when no currency option is provided. |
-| `money.locale` | `string` / `helpers.locale` | Locale override only for `helpers.money`. |
-| `money.currencyDisplay` | `'symbol' | 'code' | 'name' | 'narrowSymbol'` / `'symbol'` | Currency display style passed to `Intl.NumberFormat`. |
-| `money.minimumFractionDigits` | `number` / unset | Optional minimum fraction digits for money formatting. |
-| `money.maximumFractionDigits` | `number` / unset | Optional maximum fraction digits for money formatting. |
-
-Helpers defaults notes:
-- Per-call options always override these defaults.
-- If `helpers.locale` is not set, AegisNode falls back to `i18n.defaultLocale` for helper locale.
-- Legacy shorthand keys are also accepted for compatibility: `helpers.currency`, top-level `currency`, and `app.currency`.
-
-### Security (`security`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `appSecret` | `string` / `''` | Shared secret for signing security artifacts. Use at least 16 chars. |
-| `headers` | `object` / see headers table | Helmet + CSP configuration. |
-| `ddos` | `object` / see ddos table | `express-rate-limit` based protection. |
-| `csrf` | `object` / see csrf table | CSRF cookie/token behavior. |
-
-#### Security Headers (`security.headers`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable Helmet middleware. |
-| `csp` | `object` / see CSP table | Content Security Policy behavior. |
-
-#### CSP (`security.headers.csp`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable CSP header from Helmet. |
-| `reportOnly` | `boolean` / `false` | Use report-only mode. |
-| `directives` | `object` / `{}` | Directive overrides. Set a directive to `false`/`null` to remove it. |
-
-Default CSP base includes safe defaults such as `defaultSrc 'self'`, `objectSrc 'none'`, `frameAncestors 'none'`, and websocket-aware `connectSrc`.
-
-Allow multiple external domains by adding them per directive (not globally):
-
-```js
-security: {
-  headers: {
-    csp: {
-      directives: {
-        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net', 'https://unpkg.com'],
-        scriptSrcElem: ["'self'", 'https://cdn.jsdelivr.net', 'https://unpkg.com'],
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
-        styleSrcElem: ["'self'", 'https://cdn.jsdelivr.net'],
-        imgSrc: ["'self'", 'data:', 'https://cdn.jsdelivr.net'],
-        connectSrc: ["'self'", 'https://api.example.com', 'wss://socket.example.com'],
-      },
-    },
-  },
-},
-```
-
-Notes:
-- Add each origin to the exact directive needed (scripts, styles, images, API/WebSocket connections).
-- If browser reports a `script-src-elem` violation, whitelist the domain in `scriptSrcElem`.
-- Prefer explicit origins instead of `*` in production.
-
-Google Fonts example:
-
-```js
-security: {
-  headers: {
-    csp: {
-      directives: {
-        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-        styleSrcElem: ["'self'", 'https://fonts.googleapis.com'],
-        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
-      },
-    },
-  },
-},
-```
-
-#### DDoS / Rate Limit (`security.ddos`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable rate limiter. |
-| `windowMs` | `number` / `60000` | Rate limit window in milliseconds. |
-| `maxRequests` | `number` / `120` | Max requests per window per key. |
-| `message` | `string` / `'Too many requests, please try again later.'` | JSON error message text. |
-| `statusCode` | `number` / `429` | Response status code when limited. |
-| `standardHeaders` | `boolean` / `true` | Emit modern rate-limit headers. |
-| `legacyHeaders` | `boolean` / `false` | Emit legacy `X-RateLimit-*` headers. |
-| `skipSuccessfulRequests` | `boolean` / `false` | Do not count successful responses. |
-| `skipFailedRequests` | `boolean` / `false` | Do not count failed responses. |
-| `trustProxy` | `boolean \| number \| string` / `false` | Legacy alias for top-level `trustProxy`. Still supported for backward compatibility. |
-| `store` | `object \| null` / `null` | Custom rate-limit store implementation. |
-| `skipPaths` | `string[]` / `['/health']` | Path prefixes excluded from limiter. |
-
-#### CSRF (`security.csrf`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable CSRF middleware. |
-| `rejectForms` | `boolean` / `true` | Enforce CSRF on form submissions. |
-| `rejectUnsafeMethods` | `boolean` / `true` | Enforce CSRF for unsafe methods (`POST/PUT/PATCH/DELETE`) in general. |
-| `cookieName` | `string` / `'_aegis_csrf'` | CSRF cookie name. |
-| `fieldName` | `string` / `'_csrf'` | Body form field name for CSRF token. |
-| `headerName` | `string` / `'x-csrf-token'` | Header token key (normalized lowercase). |
-| `requireSignedCookie` | `boolean` / `true` | Require signed CSRF cookie values. |
-| `sameSite` | `'lax' \| 'strict' \| 'none' \| false` / `'lax'` | CSRF cookie same-site mode. |
-| `secure` | `boolean \| 'auto'` / `'auto'` | Secure cookie flag (`auto` respects request security). |
-| `httpOnly` | `boolean` / `true` | Make CSRF cookie httpOnly. |
-| `path` | `string` / `'/'` | CSRF cookie path. |
-
-CSRF notes:
-- With `requireSignedCookie: true` (default), `security.appSecret` must be strong (minimum 16 chars) or startup fails.
-- CSRF is skipped for configured API app mounts when `api.disableCsrf: true`.
-- CSRF is skipped on built-in OAuth2 server endpoints.
-
-### Logging (`logging`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `level` | `'error' \| 'warn' \| 'info' \| 'debug' \| 'trace'` / `'info'` | Logger verbosity threshold. |
-
-### Database (`database`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `false` | Enable database bootstrap. |
-| `dialect` | `string` / `'pg'` | SQL: `mysql`, `pg`/`postgres`/`postgresql`, `sqlite`, `mssql`, `oracle`; NoSQL: `mongo`/`mongodb`/`mongoose`. |
-| `config` | `object` / `{}` | Connection options passed to database driver. |
-| `options` | `object` / `{}` | Extra options (used directly for Mongo when enabled). |
-| `uri` | `string` / unset | Legacy Mongo URI fallback (still accepted). Prefer `config.connectionString`. |
-
-Mongo config shortcuts accepted in `database.config`:
-- `connectionString` (preferred)
-- or `server`/`host`, `port`, `database`/`dbName`, `user`/`username`, `password`
-
-### Cache (`cache`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable cache service. |
-| `driver` | `string` / `'memory'` | Cache driver. Currently only `memory` is built-in. |
-| `options` | `object` / `{}` | Reserved for future/custom drivers. |
-
-### WebSocket (`websocket`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable Socket.IO server. |
-| `cors` | `object` / `{ origin: false }` | Passed directly to Socket.IO `cors` option. |
-
-### Uploads (`uploads`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Enable built-in upload manager. |
-| `dir` | `string` / `'uploads'` | Upload destination folder (absolute or relative to project root). |
-| `createDir` | `boolean` / `true` | Create upload directory automatically on boot. |
-| `preserveExtension` | `boolean` / `true` | Preserve original file extension in generated file name. |
-| `maxFileSize` | `number \| string` / `5 * 1024 * 1024` | Per-file max size in bytes. String units like `'5mb'` are accepted. |
-| `maxFiles` | `number` / `5` | Max file count per request. |
-| `maxFields` | `number` / `50` | Max non-file form fields per request. |
-| `maxFieldSize` | `number \| string` / `1024 * 1024` | Max size per form field value. String units are accepted. |
-| `allowedMimeTypes` | `string[] \| string` / `[]` | Allowed MIME types. Empty means allow all. |
-| `allowedExtensions` | `string[] \| string` / `[]` | Allowed file extensions (`.jpg`, `.pdf`, ...). Empty means allow all. |
-| `allowApiMultipart` | `boolean` / `true` | Allow `multipart/form-data` on API mounts even when `api.requireJsonForUnsafeMethods` is true. |
-
-### Mail (`mail`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `false` | Enable the built-in mail manager. |
-| `defaults` | `object` / `{ from: '', replyTo: '' }` | Default message fields merged into every outgoing mail payload. |
-| `defaults.from` | `string` / `''` | Default sender used when `mail.send(...)` omits `from`. |
-| `defaults.replyTo` | `string` / `''` | Default `replyTo` header for outgoing mail. |
-| `transport` | `object \| string` / `{}` | Nodemailer transport config or SMTP connection URL passed to `nodemailer.createTransport(...)`. |
-| `transporter` | `object \| null` / `null` | Prebuilt transporter object with `sendMail()`. Useful in tests or custom integrations. |
-| `transportFactory` | `function \| null` / `null` | Factory that returns a transporter object with `sendMail()`. |
-| `verifyOnStartup` | `boolean` / `false` | Call `transporter.verify()` during boot when the transporter supports it. |
-
-Mail notes:
-- The runtime uses [Nodemailer](https://nodemailer.com/).
-- `mail.send(payload)` and `mail.sendMail(payload)` are aliases.
-- Each payload must include at least one of `to`, `cc`, or `bcc`.
-- Each payload must include `from`, or configure `mail.defaults.from`.
-- Injected `mail` is available in handlers, services, models, validators, controllers, subscribers, and loaders, plus `req.aegis.mail`.
-
-### API (`api`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `apps` | `string[]` / `[]` | App names treated as API apps. Mounts are resolved from `settings.apps`. |
-| `disableCsrf` | `boolean` / `true` | Skip CSRF checks for API app mounts. |
-| `requireJsonForUnsafeMethods` | `boolean` / `true` | Reject unsafe API payloads unless `Content-Type` is JSON (`415`). Multipart is allowed when `uploads.allowApiMultipart=true`. |
-| `noStoreHeaders` | `boolean` / `true` | Set `Cache-Control: no-store` on API responses. |
-
-API notes:
-- `api.apps` contains app names from `settings.apps`, not URL paths.
-- Marking an app as API does not generate REST routes or change the app file structure. It only applies API middleware to that app mount.
-- The effective API mount comes from `settings.apps[].mount` (or `/${app}` by default). Keep that aligned with your `route.use(...)` mount when `autoMountApps` is off.
-
-### Auth (`auth`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `false` | Enable auth manager. |
-| `provider` | `'jwt' \| 'oauth2'` / `'jwt'` | Active auth provider. |
-| `tablePrefix` | `string` / `'aegisnode'` | Prefix for auth storage namespaces/tables; sanitized to lowercase `[a-z0-9_]`. |
-| `storage` | `object` / see storage table | Persistence backend for auth state. |
-| `jwt` | `object` / see jwt table | JWT configuration. |
-| `oauth2` | `object` / see oauth2 table | OAuth2 server and token configuration. |
-
-#### Auth Storage (`auth.storage`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `driver` | `'cache' \| 'memory' \| 'file' \| 'database'` / `'cache'` | Storage backend for revocations/clients/tokens. |
-| `filePath` | `string` / `'storage/aegisnode-auth-store.json'` | Used when `driver: 'file'`. Relative to project root if not absolute. |
-| `tableName` | `string` / `'aegisnode_auth_store'` (prefix-based) | Used when `driver: 'database'` for SQL table or Mongo collection. |
-| `collectionName` | `string` / alias only | Legacy alias; if set and `tableName` missing, it becomes `tableName`. |
-
-#### JWT (`auth.jwt`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `secret` | `string` / `security.appSecret` fallback | Signing secret. Required for JWT auth. |
-| `algorithm` | `'HS256' \| 'HS384' \| 'HS512'` / `'HS256'` | JWT HMAC algorithm. |
-| `issuer` | `string` / `appName` | JWT issuer claim. |
-| `audience` | `string` / `appName` | JWT audience claim. |
-| `expiresIn` | `string` / `'15m'` | Access token TTL. |
-| `refreshExpiresIn` | `string` / `'7d'` | Refresh token TTL. |
-
-#### OAuth2 Core (`auth.oauth2`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `accessTokenTtlSeconds` | `number` / `3600` | Access token TTL in seconds. |
-| `refreshTokenTtlSeconds` | `number` / `1209600` | Refresh token TTL in seconds. |
-| `authorizationCodeTtlSeconds` | `number` / `600` | Authorization code TTL in seconds. |
-| `rotateRefreshToken` | `boolean` / `true` | Rotate refresh token on refresh flow. |
-| `requireClientSecret` | `boolean` / `true` | Require secret for confidential client flows. |
-| `requirePkce` | `boolean` / `true` | Require PKCE for authorization_code flow. |
-| `allowPlainPkce` | `boolean` / `false` | Allow PKCE `plain` method. |
-| `grants` | `string[]` / `['authorization_code','refresh_token','client_credentials']` | Enabled OAuth2 grants. |
-| `defaultScopes` | `string[]` / `[]` | Scopes assigned when none requested/provided. |
-| `clientAuthMethod` | `'client_secret_basic' \| 'client_secret_post' \| 'none'` / `'client_secret_basic'` | Default client authentication method. |
-| `server` | `object` / see OAuth2 server table | Built-in authorization server endpoint settings. |
-
-#### OAuth2 Server (`auth.oauth2.server`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `true` | Mount built-in OAuth2 endpoints. |
-| `basePath` | `string` / `'/oauth'` | Base path used to derive endpoint defaults. |
-| `authorizePath` | `string` / `'/oauth/authorize'` | Authorization endpoint path. |
-| `tokenPath` | `string` / `'/oauth/token'` | Token endpoint path. |
-| `introspectionPath` | `string` / `'/oauth/introspect'` | Introspection endpoint path. |
-| `revocationPath` | `string` / `'/oauth/revoke'` | Revocation endpoint path. |
-| `metadataPath` | `string` / `'/.well-known/oauth-authorization-server'` | OAuth2 metadata endpoint path. |
-| `issuer` | `string` / `server.baseUrl` fallback, then `appName` | Issuer value in OAuth2 metadata/tokens. |
-| `baseUrl` | `string` / optional alias | Alias used as fallback for `issuer` when `issuer` is empty. |
-| `autoApprove` | `boolean` / `true` | Auto-approve auth requests once subject is resolved. |
-| `requireAuthenticatedUser` | `boolean` / `true` | Require authenticated user/subject for authorize endpoint. |
-| `requireConsent` | `boolean` / `false` | Require explicit consent before issuing auth code. |
-| `allowSubjectFromParams` | `boolean` / `false` | Allow subject from request params (`subject`/`user_id`). Keep disabled in production. |
-| `allowHttp` | `boolean` / `false` | Allow OAuth2 endpoints on non-HTTPS requests. Keep `false` in production. |
-| `resolveSubject` | `function \| null` / `null` | Hook to resolve subject: `({ req, params, client }) => string|null`. |
-| `resolveConsent` | `function \| null` / `null` | Hook to resolve consent: `({ req, params, client, subject }) => boolean`. |
-
-### Swagger (`swagger`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `enabled` | `boolean` / `false` | Enable Swagger UI + OpenAPI JSON endpoints. |
-| `docsPath` | `string` / `'/docs'` | Swagger UI route. |
-| `jsonPath` | `string` / `'/openapi.json'` | OpenAPI JSON route. |
-| `document` | `object \| null` / `null` | Inline OpenAPI document object. |
-| `documentPath` | `string` / `'openapi.json'` | JSON file path used when `document` is not provided. |
-| `explorer` | `boolean` / `true` | Enable Swagger UI explorer mode. |
-
-### Architecture (`architecture`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `strictLayers` | `boolean` / `false` | Enforce `route -> validator -> service -> model` restrictions. |
-
-### Auto Mount (`autoMountApps`)
-
-| Key | Type / Default | Description |
-| --- | --- | --- |
-| `autoMountApps` | `boolean` / `false` | If `true`, each `apps/<name>/routes.js` is mounted automatically from `settings.apps`. If `false`, central `routes.js` controls mounting. |
-
-### Loaders (`loaders`)
-
-`loaders` accepts an array of entries run in order during startup:
-
-1. Function entry:
-
-```js
-loaders: [
-  async ({ logger, options, config }) => {
-    logger.info('loader ran');
-  },
-]
-```
-
-2. Path entry (relative or absolute):
-
-```js
-loaders: ['loaders/init-db.js']
-```
-
-3. Object entry with options:
-
-```js
-loaders: [
-  { path: 'loaders/init-queue.js', options: { queue: 'jobs' } },
-]
-```
-
-Each loader module must export a function (default export preferred).
-Each loader receives the shared runtime context documented in the injection matrix above, plus `options` from the loader entry.
-
-### Apps (`apps`)
-
-`apps` supports two forms:
-
-```js
-apps: ['users', 'billing']
-```
-
-or
-
-```js
-apps: [
-  { name: 'users', mount: '/users' },
-  { name: 'billing', mount: '/payments' },
-]
-```
-
-Rules:
-- `name` is required in object form.
-- `mount` defaults to `/${name}`.
-- Mounts are normalized to a single leading slash (except root `/`).
-- App route modules must be declared in `settings.apps` before they can load/mount.
-
-### Environment Overrides (`environments`)
-
-Example:
-
-```js
-environments: {
-  default: {
-    logging: { level: 'debug' },
-  },
-  production: {
-    logging: { level: 'warn' },
-    security: { ddos: { maxRequests: 80 } },
-  },
-}
-```
-
-Behavior:
-- Base config loads first.
-- `environments.default` is merged next (if present).
-- `environments[env]` is merged last.
-- Arrays in overrides replace full arrays from base.
-
-<!-- SETTINGS_REFERENCE_END -->
 
 ## Core Concepts And App Structure
 
@@ -2115,6 +1602,522 @@ Then in EJS:
 <p><%= new ViewBag('Dashboard').title %></p>
 ```
 
+<!-- SETTINGS_REFERENCE_START -->
+## Full Settings Reference
+
+All fields below are supported in `settings.js`. If you omit a field, AegisNode uses the runtime default.
+
+Merge order used at startup:
+1. Framework defaults (`defaultConfig`)
+2. `settings.js`
+3. Legacy `settings/index.js` (if present)
+4. Legacy `settings/db.js` (merged into `database`)
+5. Legacy `settings/cache.js` (merged into `cache`)
+6. Legacy `settings/apps.js` (used only when `settings.js` does not define apps)
+7. `environments.default`
+8. `environments[env]` where `env = settings.env` (fallback `NODE_ENV`, then `development`)
+
+### Top-Level
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `appName` | `string` / folder name | Application name used in logs and defaults. |
+| `env` | `string` / `process.env.NODE_ENV || 'development'` | Active environment key for `environments` overrides. |
+| `host` | `string` / `process.env.HOST || '0.0.0.0'` | Bind host for HTTP server. |
+| `port` | `number` / `process.env.PORT || 3000` | Bind port for HTTP server. |
+| `trustProxy` | `boolean \| number \| string` / `false` | Express `trust proxy` value. Set this when HTTPS is terminated by a reverse proxy/load balancer. |
+| `https` | `object \| false` / see HTTPS table | Direct TLS server settings for Node-hosted HTTPS. |
+| `staticDir` | `string \| null` / `null` | Static assets directory, relative to project root (if set). |
+| `templates` | `object \| false` / see templates table | EJS template engine + layout settings. |
+| `i18n` | `object` / see i18n table | Built-in locale detection + translator bridge (`req.aegis.t`, injected `i18n.t`). |
+| `helpers` | `object` / see helpers table | Runtime helper defaults (for example currency/locale for `helpers.money`). |
+| `security` | `object` / see security tables | Security headers, DDoS limiter, CSRF settings, app secret. |
+| `logging` | `object` / `{ level: 'info' }` | Runtime logger level. |
+| `database` | `object` / see database table | SQL or MongoDB connection settings. |
+| `cache` | `object` / `{ enabled: true, driver: 'memory' }` | Cache backend settings. |
+| `websocket` | `object` / `{ enabled: true, cors: { origin: false } }` | Socket.IO server options. |
+| `uploads` | `object` / see uploads table | Built-in file upload middleware settings used by `route.upload`. |
+| `mail` | `object` / see mail table | Nodemailer-backed mail manager available as injected `mail` and `req.aegis.mail`. |
+| `api` | `object` / see API table | API-app middleware behavior (JSON enforcement, no-store, CSRF skip for API mounts). |
+| `auth` | `object` / see auth tables | JWT or OAuth2 provider settings. |
+| `swagger` | `object` / see swagger table | OpenAPI JSON + Swagger UI settings. |
+| `architecture` | `object` / `{ strictLayers: false }` | Layering enforcement mode. |
+| `autoMountApps` | `boolean` / `false` | Auto-mount each app route file from `settings.apps`. |
+| `loaders` | `array` / `[]` | Startup loaders run before routes mounting. |
+| `apps` | `array` / `[]` | Declared apps with mount points. |
+| `environments` | `object` / `{}` | Environment-specific deep overrides. |
+
+Notes:
+- `rootDir` is internal and set by runtime; do not manage it manually.
+- Arrays are replaced (not merged) during deep merge.
+
+### HTTPS (`https`)
+
+Use this only when Node should serve HTTPS directly. If HTTPS is handled by Passenger, Nginx, Apache, or another proxy, keep `https.enabled` off and set top-level `trustProxy` instead.
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Create an HTTPS server instead of HTTP. |
+| `key` | `string \| Buffer` / `null` | TLS private key content. |
+| `cert` | `string \| Buffer` / `null` | TLS certificate content. |
+| `ca` | `string \| Buffer \| array` / `null` | Optional CA/intermediate certificate content. |
+| `pfx` | `string \| Buffer` / `null` | PFX/PKCS#12 archive content. Use instead of `key` + `cert`. |
+| `keyPath` | `string` / `''` | Path to TLS private key, relative to project root or absolute. |
+| `certPath` | `string` / `''` | Path to TLS certificate, relative to project root or absolute. |
+| `caPath` | `string \| string[]` / `null` | Optional CA/intermediate certificate path(s). |
+| `pfxPath` | `string` / `''` | Path to PFX/PKCS#12 archive. |
+| `passphrase` | `string` / `''` | Optional passphrase for encrypted key/PFX files. |
+| `options` | `object` / `{}` | Extra Node `https.createServer` options (for example `minVersion`). |
+
+Direct HTTPS example:
+
+```js
+export default {
+  host: '0.0.0.0',
+  port: 3443,
+  https: {
+    enabled: true,
+    keyPath: 'certs/localhost-key.pem',
+    certPath: 'certs/localhost-cert.pem',
+    options: {
+      minVersion: 'TLSv1.2',
+    },
+  },
+};
+```
+
+Reverse-proxy HTTPS example:
+
+```js
+export default {
+  host: '127.0.0.1',
+  port: 3000,
+  trustProxy: 1,
+};
+```
+
+Notes:
+- `https` requires either `pfx`/`pfxPath` or both `key`/`keyPath` and `cert`/`certPath`.
+- Paths resolve from project root unless absolute.
+- `trustProxy` affects `req.secure`, `req.protocol`, secure cookies, and OAuth2 secure transport checks.
+- Prefer `1`, a subnet, or another exact Express `trust proxy` value instead of `true` when rate limiting is enabled.
+
+### Templates (`templates`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable template engine. |
+| `engine` | `string` / `'ejs'` | Template engine. Only `ejs` is supported. |
+| `dir` | `string` / `'templates'` | Templates folder (absolute or relative to project root). |
+| `base` | `string \| false \| null` / `'base'` | Default layout template (without `.ejs`). Set `false`/`null` to disable layout wrapping globally. |
+| `appBases` | `object` / `{}` | Per-app layout override map: `{ appName: 'layout/name' }`. Set app value to `false`/`null` to disable layout for that app only. |
+| `locals` | `object \| function` / `{}` | Global locals. If function, signature is `({ req, res, helpers, jlive, env }) => object`. |
+
+Layout notes:
+- `res.render('view', data)` renders `view.ejs` and wraps it with `base.ejs` (or configured layout).
+- Per-app layout override: `templates.appBases = { users: 'users/base', admin: 'admin/base' }`.
+- In layout, both `<%- body %>` and `<%- content %>` are available.
+- Per-render layout override: pass `layout: 'custom-layout'` or `layout: false` in locals.
+
+### Internationalization (`i18n`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable built-in i18n translator bridge. |
+| `defaultLocale` | `string` / `'en'` | Default locale used when detection fails. |
+| `fallbackLocale` | `string` / `'en'` | Fallback locale used when key is missing in active locale. |
+| `supported` | `string[]` / `['en']` | Allowed locales. Values normalize to lowercase (for example `en-US` -> `en-us`). |
+| `queryParam` | `string` / `'lang'` | Query parameter used for locale selection (for example `?lang=fr`). |
+| `cookieName` | `string` / `'aegis_locale'` | Cookie used to persist locale. |
+| `detectFromHeader` | `boolean` / `true` | Enable locale detection from `Accept-Language` header. |
+| `detectFromCookie` | `boolean` / `true` | Enable locale detection from configured cookie. |
+| `detectFromQuery` | `boolean` / `true` | Enable locale detection from query parameter. |
+| `translations` | `object` / `{}` | Translation map by locale. Values can be objects or JSON file paths: `{ en: { ... }, fr: 'locales/fr.json' }`. Alias keys `locales` and `messages` are also accepted. |
+| `translationsFile` | `string` / unset | Path to a JSON file containing all locales (example: `{ "en": {...}, "fr": {...} }`). Inline `translations` overrides file values for same locale keys. |
+
+i18n notes:
+- Detection order: query -> cookie -> `Accept-Language` -> `defaultLocale`.
+- Use dotted keys like `home.title`.
+- Placeholder interpolation supports `{name}` style tokens.
+- Relative JSON paths resolve from project root (`settings.js` location).
+- Injected `i18n` is available in handlers, services, models, validators, controllers, subscribers, and loaders. Use `i18n.t('key', vars, { locale })`.
+- During a request, injected `i18n.t(...)` follows the active request locale. Outside a request, it falls back to `defaultLocale`.
+
+### Helpers Defaults (`helpers`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `locale` | `string` / `'en-US'` | Default locale used by runtime helpers when locale is not passed explicitly. |
+| `money` | `object` / `{ currency: 'USD' }` | Default money formatting settings used by `helpers.money`. |
+| `money.currency` | `string` / `'USD'` | Default currency code for `helpers.money(amount)` when no currency option is provided. |
+| `money.locale` | `string` / `helpers.locale` | Locale override only for `helpers.money`. |
+| `money.currencyDisplay` | `'symbol' | 'code' | 'name' | 'narrowSymbol'` / `'symbol'` | Currency display style passed to `Intl.NumberFormat`. |
+| `money.minimumFractionDigits` | `number` / unset | Optional minimum fraction digits for money formatting. |
+| `money.maximumFractionDigits` | `number` / unset | Optional maximum fraction digits for money formatting. |
+
+Helpers defaults notes:
+- Per-call options always override these defaults.
+- If `helpers.locale` is not set, AegisNode falls back to `i18n.defaultLocale` for helper locale.
+- Legacy shorthand keys are also accepted for compatibility: `helpers.currency`, top-level `currency`, and `app.currency`.
+
+### Security (`security`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `appSecret` | `string` / `''` | Shared secret for signing security artifacts. Use at least 16 chars. |
+| `headers` | `object` / see headers table | Helmet + CSP configuration. |
+| `ddos` | `object` / see ddos table | `express-rate-limit` based protection. |
+| `csrf` | `object` / see csrf table | CSRF cookie/token behavior. |
+
+#### Security Headers (`security.headers`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable Helmet middleware. |
+| `csp` | `object` / see CSP table | Content Security Policy behavior. |
+
+#### CSP (`security.headers.csp`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable CSP header from Helmet. |
+| `reportOnly` | `boolean` / `false` | Use report-only mode. |
+| `directives` | `object` / `{}` | Directive overrides. Set a directive to `false`/`null` to remove it. |
+
+Default CSP base includes safe defaults such as `defaultSrc 'self'`, `objectSrc 'none'`, `frameAncestors 'none'`, and websocket-aware `connectSrc`.
+
+Allow multiple external domains by adding them per directive (not globally):
+
+```js
+security: {
+  headers: {
+    csp: {
+      directives: {
+        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net', 'https://unpkg.com'],
+        scriptSrcElem: ["'self'", 'https://cdn.jsdelivr.net', 'https://unpkg.com'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+        styleSrcElem: ["'self'", 'https://cdn.jsdelivr.net'],
+        imgSrc: ["'self'", 'data:', 'https://cdn.jsdelivr.net'],
+        connectSrc: ["'self'", 'https://api.example.com', 'wss://socket.example.com'],
+      },
+    },
+  },
+},
+```
+
+Notes:
+- Add each origin to the exact directive needed (scripts, styles, images, API/WebSocket connections).
+- If browser reports a `script-src-elem` violation, whitelist the domain in `scriptSrcElem`.
+- Prefer explicit origins instead of `*` in production.
+
+Google Fonts example:
+
+```js
+security: {
+  headers: {
+    csp: {
+      directives: {
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        styleSrcElem: ["'self'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
+      },
+    },
+  },
+},
+```
+
+#### DDoS / Rate Limit (`security.ddos`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable rate limiter. |
+| `windowMs` | `number` / `60000` | Rate limit window in milliseconds. |
+| `maxRequests` | `number` / `120` | Max requests per window per key. |
+| `message` | `string` / `'Too many requests, please try again later.'` | JSON error message text. |
+| `statusCode` | `number` / `429` | Response status code when limited. |
+| `standardHeaders` | `boolean` / `true` | Emit modern rate-limit headers. |
+| `legacyHeaders` | `boolean` / `false` | Emit legacy `X-RateLimit-*` headers. |
+| `skipSuccessfulRequests` | `boolean` / `false` | Do not count successful responses. |
+| `skipFailedRequests` | `boolean` / `false` | Do not count failed responses. |
+| `trustProxy` | `boolean \| number \| string` / `false` | Legacy alias for top-level `trustProxy`. Still supported for backward compatibility. |
+| `store` | `object \| null` / `null` | Custom rate-limit store implementation. |
+| `skipPaths` | `string[]` / `['/health']` | Path prefixes excluded from limiter. |
+
+#### CSRF (`security.csrf`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable CSRF middleware. |
+| `rejectForms` | `boolean` / `true` | Enforce CSRF on form submissions. |
+| `rejectUnsafeMethods` | `boolean` / `true` | Enforce CSRF for unsafe methods (`POST/PUT/PATCH/DELETE`) in general. |
+| `cookieName` | `string` / `'_aegis_csrf'` | CSRF cookie name. |
+| `fieldName` | `string` / `'_csrf'` | Body form field name for CSRF token. |
+| `headerName` | `string` / `'x-csrf-token'` | Header token key (normalized lowercase). |
+| `requireSignedCookie` | `boolean` / `true` | Require signed CSRF cookie values. |
+| `sameSite` | `'lax' \| 'strict' \| 'none' \| false` / `'lax'` | CSRF cookie same-site mode. |
+| `secure` | `boolean \| 'auto'` / `'auto'` | Secure cookie flag (`auto` respects request security). |
+| `httpOnly` | `boolean` / `true` | Make CSRF cookie httpOnly. |
+| `path` | `string` / `'/'` | CSRF cookie path. |
+
+CSRF notes:
+- With `requireSignedCookie: true` (default), `security.appSecret` must be strong (minimum 16 chars) or startup fails.
+- CSRF is skipped for configured API app mounts when `api.disableCsrf: true`.
+- CSRF is skipped on built-in OAuth2 server endpoints.
+
+### Logging (`logging`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `level` | `'error' \| 'warn' \| 'info' \| 'debug' \| 'trace'` / `'info'` | Logger verbosity threshold. |
+
+### Database (`database`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable database bootstrap. |
+| `dialect` | `string` / `'pg'` | SQL: `mysql`, `pg`/`postgres`/`postgresql`, `sqlite`, `mssql`, `oracle`; NoSQL: `mongo`/`mongodb`/`mongoose`. |
+| `config` | `object` / `{}` | Connection options passed to database driver. |
+| `options` | `object` / `{}` | Extra options (used directly for Mongo when enabled). |
+| `uri` | `string` / unset | Legacy Mongo URI fallback (still accepted). Prefer `config.connectionString`. |
+
+Mongo config shortcuts accepted in `database.config`:
+- `connectionString` (preferred)
+- or `server`/`host`, `port`, `database`/`dbName`, `user`/`username`, `password`
+
+### Cache (`cache`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable cache service. |
+| `driver` | `string` / `'memory'` | Cache driver. Currently only `memory` is built-in. |
+| `options` | `object` / `{}` | Reserved for future/custom drivers. |
+
+### WebSocket (`websocket`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable Socket.IO server. |
+| `cors` | `object` / `{ origin: false }` | Passed directly to Socket.IO `cors` option. |
+
+### Uploads (`uploads`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Enable built-in upload manager. |
+| `dir` | `string` / `'uploads'` | Upload destination folder (absolute or relative to project root). |
+| `createDir` | `boolean` / `true` | Create upload directory automatically on boot. |
+| `preserveExtension` | `boolean` / `true` | Preserve original file extension in generated file name. |
+| `maxFileSize` | `number \| string` / `5 * 1024 * 1024` | Per-file max size in bytes. String units like `'5mb'` are accepted. |
+| `maxFiles` | `number` / `5` | Max file count per request. |
+| `maxFields` | `number` / `50` | Max non-file form fields per request. |
+| `maxFieldSize` | `number \| string` / `1024 * 1024` | Max size per form field value. String units are accepted. |
+| `allowedMimeTypes` | `string[] \| string` / `[]` | Allowed MIME types. Empty means allow all. |
+| `allowedExtensions` | `string[] \| string` / `[]` | Allowed file extensions (`.jpg`, `.pdf`, ...). Empty means allow all. |
+| `allowApiMultipart` | `boolean` / `true` | Allow `multipart/form-data` on API mounts even when `api.requireJsonForUnsafeMethods` is true. |
+
+### Mail (`mail`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable the built-in mail manager. |
+| `defaults` | `object` / `{ from: '', replyTo: '' }` | Default message fields merged into every outgoing mail payload. |
+| `defaults.from` | `string` / `''` | Default sender used when `mail.send(...)` omits `from`. |
+| `defaults.replyTo` | `string` / `''` | Default `replyTo` header for outgoing mail. |
+| `transport` | `object \| string` / `{}` | Nodemailer transport config or SMTP connection URL passed to `nodemailer.createTransport(...)`. |
+| `transporter` | `object \| null` / `null` | Prebuilt transporter object with `sendMail()`. Useful in tests or custom integrations. |
+| `transportFactory` | `function \| null` / `null` | Factory that returns a transporter object with `sendMail()`. |
+| `verifyOnStartup` | `boolean` / `false` | Call `transporter.verify()` during boot when the transporter supports it. |
+
+Mail notes:
+- The runtime uses [Nodemailer](https://nodemailer.com/).
+- `mail.send(payload)` and `mail.sendMail(payload)` are aliases.
+- Each payload must include at least one of `to`, `cc`, or `bcc`.
+- Each payload must include `from`, or configure `mail.defaults.from`.
+- Injected `mail` is available in handlers, services, models, validators, controllers, subscribers, and loaders, plus `req.aegis.mail`.
+
+### API (`api`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `apps` | `string[]` / `[]` | App names treated as API apps. Mounts are resolved from `settings.apps`. |
+| `disableCsrf` | `boolean` / `true` | Skip CSRF checks for API app mounts. |
+| `requireJsonForUnsafeMethods` | `boolean` / `true` | Reject unsafe API payloads unless `Content-Type` is JSON (`415`). Multipart is allowed when `uploads.allowApiMultipart=true`. |
+| `noStoreHeaders` | `boolean` / `true` | Set `Cache-Control: no-store` on API responses. |
+
+API notes:
+- `api.apps` contains app names from `settings.apps`, not URL paths.
+- Marking an app as API does not generate REST routes or change the app file structure. It only applies API middleware to that app mount.
+- The effective API mount comes from `settings.apps[].mount` (or `/${app}` by default). Keep that aligned with your `route.use(...)` mount when `autoMountApps` is off.
+
+### Auth (`auth`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable auth manager. |
+| `provider` | `'jwt' \| 'oauth2'` / `'jwt'` | Active auth provider. |
+| `tablePrefix` | `string` / `'aegisnode'` | Prefix for auth storage namespaces/tables; sanitized to lowercase `[a-z0-9_]`. |
+| `storage` | `object` / see storage table | Persistence backend for auth state. |
+| `jwt` | `object` / see jwt table | JWT configuration. |
+| `oauth2` | `object` / see oauth2 table | OAuth2 server and token configuration. |
+
+#### Auth Storage (`auth.storage`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `driver` | `'cache' \| 'memory' \| 'file' \| 'database'` / `'cache'` | Storage backend for revocations/clients/tokens. |
+| `filePath` | `string` / `'storage/aegisnode-auth-store.json'` | Used when `driver: 'file'`. Relative to project root if not absolute. |
+| `tableName` | `string` / `'aegisnode_auth_store'` (prefix-based) | Used when `driver: 'database'` for SQL table or Mongo collection. |
+| `collectionName` | `string` / alias only | Legacy alias; if set and `tableName` missing, it becomes `tableName`. |
+
+#### JWT (`auth.jwt`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `secret` | `string` / `security.appSecret` fallback | Signing secret. Required for JWT auth. |
+| `algorithm` | `'HS256' \| 'HS384' \| 'HS512'` / `'HS256'` | JWT HMAC algorithm. |
+| `issuer` | `string` / `appName` | JWT issuer claim. |
+| `audience` | `string` / `appName` | JWT audience claim. |
+| `expiresIn` | `string` / `'15m'` | Access token TTL. |
+| `refreshExpiresIn` | `string` / `'7d'` | Refresh token TTL. |
+
+#### OAuth2 Core (`auth.oauth2`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `accessTokenTtlSeconds` | `number` / `3600` | Access token TTL in seconds. |
+| `refreshTokenTtlSeconds` | `number` / `1209600` | Refresh token TTL in seconds. |
+| `authorizationCodeTtlSeconds` | `number` / `600` | Authorization code TTL in seconds. |
+| `rotateRefreshToken` | `boolean` / `true` | Rotate refresh token on refresh flow. |
+| `requireClientSecret` | `boolean` / `true` | Require secret for confidential client flows. |
+| `requirePkce` | `boolean` / `true` | Require PKCE for authorization_code flow. |
+| `allowPlainPkce` | `boolean` / `false` | Allow PKCE `plain` method. |
+| `grants` | `string[]` / `['authorization_code','refresh_token','client_credentials']` | Enabled OAuth2 grants. |
+| `defaultScopes` | `string[]` / `[]` | Scopes assigned when none requested/provided. |
+| `clientAuthMethod` | `'client_secret_basic' \| 'client_secret_post' \| 'none'` / `'client_secret_basic'` | Default client authentication method. |
+| `server` | `object` / see OAuth2 server table | Built-in authorization server endpoint settings. |
+
+#### OAuth2 Server (`auth.oauth2.server`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `true` | Mount built-in OAuth2 endpoints. |
+| `basePath` | `string` / `'/oauth'` | Base path used to derive endpoint defaults. |
+| `authorizePath` | `string` / `'/oauth/authorize'` | Authorization endpoint path. |
+| `tokenPath` | `string` / `'/oauth/token'` | Token endpoint path. |
+| `introspectionPath` | `string` / `'/oauth/introspect'` | Introspection endpoint path. |
+| `revocationPath` | `string` / `'/oauth/revoke'` | Revocation endpoint path. |
+| `metadataPath` | `string` / `'/.well-known/oauth-authorization-server'` | OAuth2 metadata endpoint path. |
+| `issuer` | `string` / `server.baseUrl` fallback, then `appName` | Issuer value in OAuth2 metadata/tokens. |
+| `baseUrl` | `string` / optional alias | Alias used as fallback for `issuer` when `issuer` is empty. |
+| `autoApprove` | `boolean` / `true` | Auto-approve auth requests once subject is resolved. |
+| `requireAuthenticatedUser` | `boolean` / `true` | Require authenticated user/subject for authorize endpoint. |
+| `requireConsent` | `boolean` / `false` | Require explicit consent before issuing auth code. |
+| `allowSubjectFromParams` | `boolean` / `false` | Allow subject from request params (`subject`/`user_id`). Keep disabled in production. |
+| `allowHttp` | `boolean` / `false` | Allow OAuth2 endpoints on non-HTTPS requests. Keep `false` in production. |
+| `resolveSubject` | `function \| null` / `null` | Hook to resolve subject: `({ req, params, client }) => string|null`. |
+| `resolveConsent` | `function \| null` / `null` | Hook to resolve consent: `({ req, params, client, subject }) => boolean`. |
+
+### Swagger (`swagger`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `enabled` | `boolean` / `false` | Enable Swagger UI + OpenAPI JSON endpoints. |
+| `docsPath` | `string` / `'/docs'` | Swagger UI route. |
+| `jsonPath` | `string` / `'/openapi.json'` | OpenAPI JSON route. |
+| `document` | `object \| null` / `null` | Inline OpenAPI document object. |
+| `documentPath` | `string` / `'openapi.json'` | JSON file path used when `document` is not provided. |
+| `explorer` | `boolean` / `true` | Enable Swagger UI explorer mode. |
+
+### Architecture (`architecture`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `strictLayers` | `boolean` / `false` | Enforce `route -> validator -> service -> model` restrictions. |
+
+### Auto Mount (`autoMountApps`)
+
+| Key | Type / Default | Description |
+| --- | --- | --- |
+| `autoMountApps` | `boolean` / `false` | If `true`, each `apps/<name>/routes.js` is mounted automatically from `settings.apps`. If `false`, central `routes.js` controls mounting. |
+
+### Loaders (`loaders`)
+
+`loaders` accepts an array of entries run in order during startup:
+
+1. Function entry:
+
+```js
+loaders: [
+  async ({ logger, options, config }) => {
+    logger.info('loader ran');
+  },
+]
+```
+
+2. Path entry (relative or absolute):
+
+```js
+loaders: ['loaders/init-db.js']
+```
+
+3. Object entry with options:
+
+```js
+loaders: [
+  { path: 'loaders/init-queue.js', options: { queue: 'jobs' } },
+]
+```
+
+Each loader module must export a function (default export preferred).
+Each loader receives the shared runtime context documented in the injection matrix above, plus `options` from the loader entry.
+
+### Apps (`apps`)
+
+`apps` supports two forms:
+
+```js
+apps: ['users', 'billing']
+```
+
+or
+
+```js
+apps: [
+  { name: 'users', mount: '/users' },
+  { name: 'billing', mount: '/payments' },
+]
+```
+
+Rules:
+- `name` is required in object form.
+- `mount` defaults to `/${name}`.
+- Mounts are normalized to a single leading slash (except root `/`).
+- App route modules must be declared in `settings.apps` before they can load/mount.
+
+### Environment Overrides (`environments`)
+
+Example:
+
+```js
+environments: {
+  default: {
+    logging: { level: 'debug' },
+  },
+  production: {
+    logging: { level: 'warn' },
+    security: { ddos: { maxRequests: 80 } },
+  },
+}
+```
+
+Behavior:
+- Base config loads first.
+- `environments.default` is merged next (if present).
+- `environments[env]` is merged last.
+- Arrays in overrides replace full arrays from base.
+
+<!-- SETTINGS_REFERENCE_END -->
+
 ## Runtime Patterns And Advanced Topics
 
 ### Middleware
@@ -2132,6 +2135,90 @@ You can also use `route.use()`:
 route.use(requestLogger);
 route.use('/admin', adminGuard, adminRoutes);
 ```
+
+Basic middleware example:
+
+```js
+function requestLogger(req, res, next) {
+  console.log(req.method, req.originalUrl);
+  next();
+}
+
+function requireModerator(req, res, next) {
+  if (!req.auth?.roles?.includes('moderator')) {
+    return res.status(403).json({ error: 'Moderator access required' });
+  }
+  next();
+}
+
+export default {
+  register(route) {
+    route.use(requestLogger);
+    route.get('/threads/:id/edit', requireModerator, ThreadsView.edit);
+    route.use('/admin', requireModerator, adminRoutes);
+  },
+};
+```
+
+AegisNode-specific middleware with injected runtime context:
+
+```js
+async function forumContext({ helpers, i18n, logger }, req, res, next) {
+  logger.info(`Forum request: ${req.method} ${req.originalUrl}`);
+  res.locals.t = i18n.t;
+  res.locals.formatNumber = helpers.number;
+  next();
+}
+
+export default {
+  register(route) {
+    route.use(forumContext);
+    route.get('/threads', ThreadsView.index);
+  },
+};
+```
+
+Injected middleware context can include:
+- `config`
+- `env`
+- `i18n`
+- `mail`
+- `logger`
+- `events`
+- `cache`
+- `io`
+- `auth`
+- `helpers`
+- `upload`
+- `services`
+- `models`
+- `validators`
+- `service`
+- `model`
+- `validator`
+- `database`
+- `dbClient`
+
+Auth middleware example:
+
+```js
+export default {
+  register(route) {
+    const authGuard = (req, res, next) => req.aegis.auth.middleware()(req, res, next);
+    route.get('/account', authGuard, UsersView.account);
+  },
+};
+```
+
+Uploads also work as route middleware:
+
+```js
+route.post('/avatar', route.upload.single('avatar'), UsersView.uploadAvatar);
+```
+
+Important note:
+- In AegisNode, a 4-argument function is treated as `(context, req, res, next)`.
+- Do not use Express error-handler shape `(err, req, res, next)` in route chains, because the first argument is reserved for injected runtime context.
 
 ### Validators (Between Route And Service)
 

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AegisNode Docs - API &amp; Auth Settings</title>
+    <meta
+      name="description"
+      content="API, auth, JWT, OAuth2, and Swagger settings for AegisNode using a forum threads API example."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <p class="eyebrow">AegisNode</p>
+          <h1>Docs</h1>
+          <p class="brand-copy">Multi-page HTML documentation using a forum app as the running example.</p>
+          <a class="readme-link" href="../README.md">Open full README</a>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Documentation pages">
+          <div class="nav-group">
+            <p class="nav-title">Start</p>
+            <a href="./index.html">Overview</a>
+            <a href="./quick-start.html">Quick Start</a>
+            <a href="./deployment.html">Deployment</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Core</p>
+            <a href="./app-structure.html#project-shape">Project Shape</a>
+            <a href="./app-structure.html#runtime-injection">Runtime Injection</a>
+            <a href="./settings-foundation.html#top-level">Top-Level Settings</a>
+            <a href="./settings-foundation.html#https">HTTPS</a>
+            <a href="./settings-foundation.html#logging">Logging</a>
+            <a href="./settings-foundation.html#environments">Environment Overrides</a>
+            <a href="./settings-architecture.html#architecture">Architecture</a>
+            <a href="./settings-architecture.html#auto-mount">Auto Mount</a>
+            <a href="./settings-architecture.html#loaders">Loaders</a>
+            <a href="./settings-architecture.html#apps">Apps</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Features</p>
+            <a href="./settings-platform.html#maintenance">Maintenance Mode</a>
+            <a href="./settings-ui.html#templates">Templates</a>
+            <a href="./settings-ui.html#i18n">Internationalization</a>
+            <a href="./settings-ui.html#helpers">Helpers &amp; jlive</a>
+            <a href="./settings-platform.html#security">Security</a>
+            <a href="./settings-platform.html#database">Database</a>
+            <a href="./settings-platform.html#cache">Cache</a>
+            <a href="./settings-platform.html#websocket">WebSocket</a>
+            <a href="./settings-platform.html#uploads">Uploads</a>
+            <a href="./settings-platform.html#mail">Mail</a>
+            <a class="current" href="./settings-api.html#api">API Apps</a>
+            <a class="current" href="./settings-api.html#auth">Auth</a>
+            <a class="current" href="./settings-api.html#swagger">Swagger</a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-title">Runtime</p>
+            <a href="./runtime-patterns.html#middleware">Middleware</a>
+            <a href="./runtime-patterns.html#validators">Validators</a>
+            <a href="./runtime-patterns.html#strict-layers">Strict Layers</a>
+            <a href="./runtime-patterns.html#subscribers">Subscribers</a>
+          </div>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <section class="hero">
+          <p class="eyebrow">API &amp; Auth Settings</p>
+          <h2>Expose a threads API, choose a token strategy, and publish reference docs for API consumers.</h2>
+          <p class="hero-copy">
+            The API layer in AegisNode is opt-in. It changes middleware behavior for chosen apps, then auth decides how
+            clients prove identity. Swagger documents what you expose.
+          </p>
+        </section>
+
+        <section class="doc-section" id="api">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>API Apps</h2>
+          </div>
+          <p>
+            Mark specific app names as API apps when you want JSON-first behavior. This does not generate routes; it
+            only applies API middleware to the app mount declared in <code>settings.apps</code>.
+          </p>
+          <pre><code>export default {
+  apps: [
+    { name: 'forums', mount: '/forums' },
+    { name: 'threads', mount: '/api/threads' },
+    { name: 'users', mount: '/users' },
+  ],
+  api: {
+    apps: ['threads'],
+    disableCsrf: true,
+    requireJsonForUnsafeMethods: true,
+    noStoreHeaders: true,
+  },
+};</code></pre>
+          <pre><code>// routes.js
+import threadsApi from './apps/threads/routes.js';
+
+export default {
+  register(route) {
+    route.use('/api/threads', threadsApi);
+  },
+};</code></pre>
+        </section>
+
+        <section class="doc-section" id="auth">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Auth, JWT, And OAuth2</h2>
+          </div>
+          <p>
+            Use <strong>JWT</strong> when the forum API is mainly consumed by your own frontend, mobile app, or admin
+            client. Use <strong>OAuth2</strong> when third-party apps need standards-based delegated access, client
+            credentials, or authorization-code flows.
+          </p>
+          <pre><code>auth: {
+  enabled: true,
+  provider: 'jwt',
+  storage: {
+    driver: 'file',
+    filePath: 'storage/forum-auth.json',
+  },
+  jwt: {
+    secret: process.env.JWT_SECRET,
+    issuer: 'forum',
+    audience: 'forum-clients',
+    expiresIn: '15m',
+    refreshExpiresIn: '7d',
+  },
+}</code></pre>
+          <pre><code>// JWT forum API route
+route.get('/me/threads', auth.required(), ThreadsView.mine);</code></pre>
+          <pre><code>auth: {
+  enabled: true,
+  provider: 'oauth2',
+  storage: {
+    driver: 'database',
+    tableName: 'forum_oauth_store',
+  },
+  oauth2: {
+    grants: ['authorization_code', 'refresh_token', 'client_credentials'],
+    requirePkce: true,
+    server: {
+      enabled: true,
+      basePath: '/oauth',
+      issuer: 'https://forum.example.com',
+      allowHttp: false,
+    },
+  },
+}</code></pre>
+          <div class="callout">
+            Practical rule: choose JWT first for first-party forum clients. Move to OAuth2 when you need external app
+            integrations, delegated scopes, or standards-compliant machine-to-machine access.
+          </div>
+        </section>
+
+        <section class="doc-section" id="swagger">
+          <div class="section-heading">
+            <p class="eyebrow">Settings</p>
+            <h2>Swagger</h2>
+          </div>
+          <p>
+            Swagger serves the OpenAPI JSON plus a browser UI. This is useful when mobile or frontend teams need a
+            stable reference for the forum threads API.
+          </p>
+          <pre><code>swagger: {
+  enabled: true,
+  docsPath: '/docs',
+  jsonPath: '/openapi.json',
+  documentPath: 'openapi/forum-api.json',
+  explorer: true,
+}</code></pre>
+          <pre><code>{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Forum Threads API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/threads": {
+      "get": {
+        "summary": "List threads"
+      }
+    }
+  }
+}</code></pre>
+        </section>
+
+        <div class="page-nav">
+          <a href="./settings-platform.html">Back to Platform Settings</a>
+          <a href="./settings-architecture.html">Next: Architecture Settings</a>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>
