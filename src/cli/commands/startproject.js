@@ -53,7 +53,7 @@ async function createBaseProjectFiles(projectRoot, projectName) {
   await writeFile(path.join(projectRoot, '.env'), renderProjectEnv(appSecret));
   await writeFile(path.join(projectRoot, '.env.example'), renderEnvExample());
 
-  await writeFile(path.join(projectRoot, 'settings.js'), renderProjectSettings(projectName, apps));
+  await writeFile(path.join(projectRoot, 'settings.js'), renderProjectSettings(projectName, apps, appSecret));
   await writeFile(path.join(projectRoot, 'routes.js'), renderProjectRoutes());
 }
 

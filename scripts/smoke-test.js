@@ -10,6 +10,7 @@ import { createApp } from '../src/cli/commands/createapp.js';
 import { generateArtifact } from '../src/cli/commands/generate.js';
 import { createKernel } from '../src/runtime/kernel.js';
 import { runServer } from '../src/cli/commands/runserver.js';
+import { runGenerateLoader } from '../src/cli/commands/generateloader.js';
 import { runProject } from '../src/index.js';
 import { createAuthManager, normalizeAuthConfig } from '../src/runtime/auth.js';
 import { loadProjectConfig } from '../src/runtime/config.js';
@@ -137,8 +138,10 @@ async function main() {
   await startProject({ projectName, cwd: sandboxRoot });
   const generatedProjectEnv = await fs.readFile(path.join(projectRoot, '.env'), 'utf8');
   assert.match(generatedProjectEnv, /^APP_SECRET=.{16,}$/m);
+  const generatedAppSecret = generatedProjectEnv.match(/^APP_SECRET=(.+)$/m)?.[1]?.trim();
+  assert.ok(generatedAppSecret);
   const generatedSettings = await fs.readFile(path.join(projectRoot, 'settings.js'), 'utf8');
-  assert.match(generatedSettings, /appSecret:\s*process\.env\.APP_SECRET\s*\|\|\s*''/);
+  assert.ok(generatedSettings.includes(`appSecret: process.env.APP_SECRET || ${JSON.stringify(generatedAppSecret)}`));
   await assert.rejects(
     () => runProject({
       rootDir: projectRoot,
@@ -403,6 +406,74 @@ dkcqnJD4SGWVeG+KhA==
     const filePath = path.join(projectRoot, relativeFile);
     await fs.access(filePath);
   }
+
+  await fs.unlink(path.join(projectRoot, 'app.js'));
+  await fs.unlink(path.join(projectRoot, 'loader.cjs'));
+  const restoredStartupEntries = await runGenerateLoader({
+    projectRoot,
+    output: {
+      log() {},
+    },
+  });
+  assert.equal(restoredStartupEntries.createdApp, true);
+  assert.equal(restoredStartupEntries.createdLoader, true);
+  await fs.access(path.join(projectRoot, 'app.js'));
+  await fs.access(path.join(projectRoot, 'loader.cjs'));
+
+  await fs.writeFile(
+    path.join(envProjectRoot, 'settings.js'),
+    `export default {
+  appName: 'envdemo',
+  env: 'production',
+  logging: {
+    level: 'info',
+  },
+  security: {
+    appSecret: process.env.APP_SECRET || '',
+    ddos: {
+      maxRequests: 120,
+    },
+  },
+  environments: {
+    default: {
+      security: {
+        ddos: {
+          windowMs: 45000,
+        },
+      },
+    },
+    production: {
+      logging: { level: 'warn' },
+      security: { ddos: { maxRequests: 80 } },
+    },
+  },
+};
+`,
+    'utf8',
+  );
+  await fs.unlink(path.join(envProjectRoot, 'loader.cjs'));
+  const missingLoaderDoctorReport = await runDoctor({
+    projectRoot: envProjectRoot,
+    failOnError: false,
+    output: {
+      log() {},
+    },
+  });
+  assert.equal(missingLoaderDoctorReport.summary.errors, 1);
+  assert.ok(
+    missingLoaderDoctorReport.entries.some((entry) => (
+      entry.level === 'ERROR'
+      && /loader\.cjs is missing for production startup/.test(entry.message)
+    )),
+  );
+  const restoredProductionLoader = await runGenerateLoader({
+    projectRoot: envProjectRoot,
+    output: {
+      log() {},
+    },
+  });
+  assert.equal(restoredProductionLoader.createdLoader, true);
+  await fs.access(path.join(envProjectRoot, 'loader.cjs'));
 
   const registryPackages = new Map([
     ['alpha', '2.0.0'],
@@ -1288,7 +1359,7 @@ export default {
   );
   await fs.writeFile(
     path.join(projectRoot, 'routes.js'),
-    `export default {\n  register(route) {\n    route.get('/csrf-token', (req, res) => {\n      res.json({ token: req.csrfToken() });\n    });\n\n    route.get('/csrf-form', (req, res) => {\n      return res.render('csrf-form', { layout: false });\n    });\n\n    route.post('/submit', (req, res) => {\n      res.json({ ok: true, body: req.body || {} });\n    });\n  },\n};\n`,
+    `export default {\n  register(route) {\n    route.get('/csrf-token', (req, res) => {\n      res.json({ token: req.csrfToken() });\n    });\n\n    route.get('/csrf-form', (req, res) => {\n      return res.render('csrf-form', { layout: false });\n    });\n\n    route.post('/submit', (req, res) => {\n      res.json({ ok: true, body: req.body || {} });\n    });\n\n    route.post('/submit-upload', route.upload.none(), (req, res) => {\n      res.json({ ok: true, body: req.body || {} });\n    });\n  },\n};\n`,
     'utf8',
   );
 
@@ -1360,6 +1431,32 @@ export default {
   const validJsonTokenJson = await validJsonTokenResponse.json();
   assert.equal(validJsonTokenJson.ok, true);
   assert.equal(validJsonTokenJson.body.name, 'json-with-token');
+
+  const missingMultipartTokenBody = new FormData();
+  missingMultipartTokenBody.set('name', 'multipart-without-token');
+  const missingMultipartTokenResponse = await fetch(`http://127.0.0.1:${csrfPort}/submit-upload`, {
+    method: 'POST',
+    headers: {
+      cookie: csrfCookie,
+    },
+    body: missingMultipartTokenBody,
+  });
+  assert.equal(missingMultipartTokenResponse.status, 403);
+
+  const validMultipartTokenBody = new FormData();
+  validMultipartTokenBody.set('_csrf', csrfTokenJson.token);
+  validMultipartTokenBody.set('name', 'multipart-with-token');
+  const validMultipartTokenResponse = await fetch(`http://127.0.0.1:${csrfPort}/submit-upload`, {
+    method: 'POST',
+    headers: {
+      cookie: csrfCookie,
+    },
+    body: validMultipartTokenBody,
+  });
+  assert.equal(validMultipartTokenResponse.status, 200);
+  const validMultipartTokenJson = await validMultipartTokenResponse.json();
+  assert.equal(validMultipartTokenJson.ok, true);
+  assert.equal(validMultipartTokenJson.body.name, 'multipart-with-token');
 
   const csrfFormResponse = await fetch(`http://127.0.0.1:${csrfPort}/csrf-form`, {
     headers: {

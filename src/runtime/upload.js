@@ -120,6 +120,47 @@ function createUploadError(code, message, statusCode) {
   return error;
 }
 
+function constantTimeEqual(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') {
+    return false;
+  }
+
+  const a = Buffer.from(left);
+  const b = Buffer.from(right);
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  try {
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+function validateDeferredMultipartCsrf(req) {
+  const csrfState = req?.aegis?.csrf;
+  if (!csrfState || csrfState.deferredMultipart !== true) {
+    return null;
+  }
+
+  const expected = typeof csrfState.token === 'string' ? csrfState.token : '';
+  const fieldName = typeof csrfState.fieldName === 'string' && csrfState.fieldName.length > 0
+    ? csrfState.fieldName
+    : '_csrf';
+  const provided = req?.body && typeof req.body === 'object'
+    ? req.body[fieldName]
+    : '';
+
+  delete req.aegis.csrf;
+
+  if (!expected || typeof provided !== 'string' || !constantTimeEqual(provided, expected)) {
+    return createUploadError('AEGIS_CSRF_INVALID', 'CSRF token missing or invalid', 403);
+  }
+
+  return null;
+}
+
 function resolveUploadError(error) {
   if (!error) {
     return null;
@@ -207,6 +248,13 @@ function wrapUploadMiddleware(middleware) {
   return (req, res, next) => {
     middleware(req, res, (error) => {
       if (!error) {
+        const csrfError = validateDeferredMultipartCsrf(req);
+        if (csrfError) {
+          res.status(csrfError.statusCode || 403).json({
+            error: csrfError.message || 'CSRF token missing or invalid',
+          });
+          return;
+        }
         next();
         return;
       }

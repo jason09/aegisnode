@@ -43,6 +43,7 @@ It keeps the development model simple, but adds enough structure and tooling to 
 Core features:
 
 - CLI generators (`startproject`, `createapp`, `runserver`)
+- Startup entry generator (`generateloader`)
 - Project health checker (`doctor`)
 - Dependency updater (`updatedeps`)
 - Maintenance mode with custom HTML responses
@@ -91,13 +92,14 @@ aegisnode runserver --project blog
 aegisnode createapp users --project blog
 aegisnode generate view profile --app users --project blog
 aegisnode generate route profile --app users --project blog
+aegisnode generateloader --project blog
 aegisnode doctor --project blog
 aegisnode updatedeps --project blog
 ```
 
 `cd blog` is optional. You can run commands from parent folder with `--project blog`.
 
-`createapp`, `generate`, `runserver`, `doctor`, and `updatedeps` are project-level commands.
+`createapp`, `generate`, `runserver`, `generateloader`, `doctor`, and `updatedeps` are project-level commands.
 Run them from the project root; do not `cd` into `apps/<app>`.
 Startup mode rules:
 - Development (`env === development`): start with `aegisnode runserver` only.
@@ -162,10 +164,19 @@ aegisnode doctor
 
 `doctor` checks:
 - Project structure (`settings.js`, `routes.js`, app folders)
+- Startup entry files (`app.js`, `loader.cjs`), with production errors when `loader.cjs` is missing
 - App declarations vs filesystem
 - Security baseline (`appSecret`, csrf/headers/ddos toggles)
 - Auth safety checks (JWT secret, OAuth2 `allowHttp` in production)
 - Template directory availability
+
+Regenerate project startup entry files if needed:
+
+```bash
+aegisnode generateloader
+```
+
+This restores `loader.cjs` and also recreates `app.js` if it is missing.
 
 Update project dependencies to the current npm `latest` dist-tag:
 
@@ -223,7 +234,7 @@ Access environment values anywhere with `process.env`:
 export default {
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
   security: {
-    appSecret: process.env.APP_SECRET || '',
+    appSecret: process.env.APP_SECRET || '<generated-at-scaffold-time>',
   },
 };
 ```
@@ -240,7 +251,7 @@ export default {
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
   trustProxy: false,
   security: {
-    appSecret: process.env.APP_SECRET || '',
+    appSecret: process.env.APP_SECRET || '<generated-at-scaffold-time>',
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
@@ -265,7 +276,7 @@ export default {
 
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
-- `startproject` also writes a local `.env` with a generated `APP_SECRET`.
+- `startproject` writes a local `.env` with a generated `APP_SECRET` and also embeds the same generated secret in `settings.js` as a fallback.
 - Add optional blocks manually only when needed: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `mail`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
@@ -2512,7 +2523,7 @@ security: {
 ```
 
 `security.appSecret` should be strong (at least 16 chars). It is used to sign CSRF cookies and is required when `security.csrf.requireSignedCookie` is true (default).
-New projects load it from `.env` through `APP_SECRET` by default.
+New projects load it from `.env` through `APP_SECRET` by default, and the generated `settings.js` also contains the same scaffold-time secret as a fallback literal.
 If neither `APP_SECRET` nor `security.appSecret` is set, AegisNode generates a fallback secret and persists it to `.aegis/app-secret`.
 If you run behind a reverse proxy, prefer top-level `trustProxy` (for example `1`) so client IP, secure-cookie detection, and HTTPS-aware auth logic are correct.
 
@@ -2530,6 +2541,8 @@ For forms, include token from `csrfToken`:
   <button type="submit">Send</button>
 </form>
 ```
+
+For `multipart/form-data` routes, use `route.upload.*` so AegisNode can parse the multipart body and validate the hidden `_csrf` field before your handler runs.
 
 If you need the raw token string (for AJAX header), use `csrfValue`.
 For API clients (Postman/mobile) you can either send `x-csrf-token` or set `security.csrf.rejectUnsafeMethods = false`.

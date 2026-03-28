@@ -53,7 +53,7 @@ export function renderProjectLoaderCjs() {
 `;
 }
 
-export function renderProjectSettings(projectName, apps) {
+export function renderProjectSettings(projectName, apps, appSecret = '') {
   return `export default {
   appName: '${projectName}',
   env: process.env.NODE_ENV || 'development',
@@ -61,8 +61,9 @@ export function renderProjectSettings(projectName, apps) {
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
   trustProxy: false,
   security: {
-    // Loaded from .env by default. Replace or rotate APP_SECRET in production.
-    appSecret: process.env.APP_SECRET || '',
+    // Loaded from .env by default. Scaffold also embeds the generated secret as a fallback.
+    // Replace or rotate APP_SECRET in production.
+    appSecret: process.env.APP_SECRET || ${JSON.stringify(appSecret)},
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',

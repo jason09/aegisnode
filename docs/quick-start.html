@@ -83,7 +83,8 @@
 
 aegisnode startproject forum
 npm --prefix forum install</code></pre>
-          <p>The scaffold gives you <code>app.js</code>, <code>loader.cjs</code>, <code>settings.js</code>, <code>routes.js</code>, and a generated <code>.env</code> with <code>APP_SECRET</code>.</p>
+          <p>The scaffold gives you <code>app.js</code>, <code>loader.cjs</code>, <code>settings.js</code>, <code>routes.js</code>, and a generated <code>.env</code> with <code>APP_SECRET</code>. The generated <code>settings.js</code> also embeds the same secret as a fallback literal.</p>
+          <p>If <code>loader.cjs</code> or <code>app.js</code> is missing later, run <code>aegisnode generateloader --project forum</code> to restore the startup entry files.</p>
         </section>
 
         <section class="doc-section" id="generate-apps">

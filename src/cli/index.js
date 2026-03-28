@@ -4,6 +4,7 @@ import { runServer } from './commands/runserver.js';
 import { generateArtifact } from './commands/generate.js';
 import { runDoctor } from './commands/doctor.js';
 import { runUpdateDependencies } from './commands/updatedeps.js';
+import { runGenerateLoader } from './commands/generateloader.js';
 
 function printHelp() {
   console.log(`AegisNode CLI
@@ -13,6 +14,7 @@ Usage:
   aegisnode createapp <app-name> [--project <path>] [--mount </path>]
   aegisnode generate <type> <name> --app <app-name> [--project <path>]
   aegisnode runserver [--project <path>] [--port <number>]
+  aegisnode generateloader [--project <path>]
   aegisnode doctor [--project <path>]
   aegisnode updatedeps [--project <path>]
 
@@ -24,6 +26,7 @@ Examples:
   aegisnode createapp users
   aegisnode generate view user --app users
   aegisnode generate validator user --app users
+  aegisnode generateloader --project blog
   aegisnode updatedeps --project blog
 `);
 }
@@ -121,6 +124,14 @@ export async function runCli(argv) {
 
     case 'doctor': {
       await runDoctor({
+        projectRoot: flags.project ? String(flags.project) : process.cwd(),
+      });
+      return;
+    }
+
+    case 'generateloader':
+    case 'loader': {
+      await runGenerateLoader({
         projectRoot: flags.project ? String(flags.project) : process.cwd(),
       });
       return;

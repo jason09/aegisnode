@@ -3148,6 +3148,16 @@ function attachCsrfProtection(expressApp, config, logger, auth = null) {
     }
 
     const provided = extractCsrfToken(req, csrfConfig);
+    if (!provided && isMultipartRequestContentType(req.headers?.['content-type'])) {
+      req.aegis = req.aegis || {};
+      req.aegis.csrf = {
+        deferredMultipart: true,
+        fieldName: csrfConfig.fieldName,
+        token,
+      };
+      return next();
+    }
+
     if (!provided || !constantTimeEqual(provided, token)) {
       return res.status(403).json({ error: 'CSRF token missing or invalid' });
     }

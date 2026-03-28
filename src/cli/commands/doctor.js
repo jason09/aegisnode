@@ -70,6 +70,30 @@ async function runAppChecks(rootDir, config, collector) {
   }
 }
 
+async function runStartupEntryChecks(rootDir, config, collector) {
+  const env = String(config.env || process.env.NODE_ENV || 'development').trim().toLowerCase();
+  const appEntryPath = path.join(rootDir, 'app.js');
+  const loaderEntryPath = path.join(rootDir, 'loader.cjs');
+  const appEntryExists = await fileExists(appEntryPath);
+  const loaderEntryExists = await fileExists(loaderEntryPath);
+
+  if (appEntryExists) {
+    collector.ok('app.js exists.');
+  } else if (env === 'production') {
+    collector.error('app.js is missing for production startup. Run "aegisnode generateloader" to restore startup entry files.');
+  } else {
+    collector.warn('app.js is missing. Run "aegisnode generateloader" to restore startup entry files.');
+  }
+
+  if (loaderEntryExists) {
+    collector.ok('loader.cjs exists.');
+  } else if (env === 'production') {
+    collector.error('loader.cjs is missing for production startup. Run "aegisnode generateloader" to restore it.');
+  } else {
+    collector.warn('loader.cjs is missing. Generate it with "aegisnode generateloader" before non-development startup.');
+  }
+}
+
 function runSecurityChecks(config, collector) {
   const env = String(config.env || process.env.NODE_ENV || 'development');
   const security = config.security || {};
@@ -179,6 +203,7 @@ export async function runDoctor({
   collector.ok(`Environment: ${config.env || 'development'}`);
 
   await runAppChecks(resolvedRoot, config, collector);
+  await runStartupEntryChecks(resolvedRoot, config, collector);
   runSecurityChecks(config, collector);
   runAuthChecks(config, collector);
   runApiChecks(config, collector);
