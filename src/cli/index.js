@@ -5,6 +5,7 @@ import { generateArtifact } from './commands/generate.js';
 import { runDoctor } from './commands/doctor.js';
 import { runUpdateDependencies } from './commands/updatedeps.js';
 import { runGenerateLoader } from './commands/generateloader.js';
+import { runFixApp } from './commands/fixapp.js';
 
 function printHelp() {
   console.log(`AegisNode CLI
@@ -12,10 +13,11 @@ function printHelp() {
 Usage:
   aegisnode startproject <project-name>
   aegisnode createapp <app-name> [--project <path>] [--mount </path>]
+  aegisnode fix [--app <app-name>] [--project <path>]
   aegisnode generate <type> <name> --app <app-name> [--project <path>]
   aegisnode runserver [--project <path>] [--port <number>]
   aegisnode generateloader [--project <path>]
-  aegisnode doctor [--project <path>]
+  aegisnode doctor [--app <app-name>] [--project <path>]
   aegisnode updatedeps [--project <path>]
 
 Examples:
@@ -24,9 +26,11 @@ Examples:
   npm install
   aegisnode runserver
   aegisnode createapp users
+  aegisnode fix --app users
   aegisnode generate view user --app users
   aegisnode generate validator user --app users
   aegisnode generateloader --project blog
+  aegisnode doctor --app users --project blog
   aegisnode updatedeps --project blog
 `);
 }
@@ -123,7 +127,23 @@ export async function runCli(argv) {
     }
 
     case 'doctor': {
+      if (positional.length > 0) {
+        throw new Error('Doctor app target must use --app <app-name>. Usage: aegisnode doctor [--app <app-name>] [--project <path>]');
+      }
       await runDoctor({
+        projectRoot: flags.project ? String(flags.project) : process.cwd(),
+        appName: flags.app ? String(flags.app) : null,
+      });
+      return;
+    }
+
+    case 'fix':
+    case 'fixapp': {
+      if (positional.length > 0) {
+        throw new Error('Fix app target must use --app <app-name>. Usage: aegisnode fix [--app <app-name>] [--project <path>]');
+      }
+      await runFixApp({
+        appName: flags.app ? String(flags.app) : undefined,
         projectRoot: flags.project ? String(flags.project) : process.cwd(),
       });
       return;

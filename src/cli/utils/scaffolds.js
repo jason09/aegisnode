@@ -403,6 +403,19 @@ export default {
 `;
 }
 
+export function renderAppUtilsFile() {
+  return `/**
+ * App-local pure utilities.
+ *
+ * Use this file for small reusable functions that belong only to this app.
+ * Keep database access in models, business workflows in services, and request
+ * validation/sanitization in validators.
+ */
+
+export {};
+`;
+}
+
 export function renderAppSubscribersFile(appName) {
   return `export default function register${toPascalCase(appName)}Subscribers({ events, logger }) {
   events.subscribe('app.booted', ({ appName }) => {

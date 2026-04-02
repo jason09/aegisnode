@@ -1,7 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { loadProjectConfig } from '../../runtime/config.js';
+import { ensureValidName } from '../utils/fs.js';
 import { resolveProjectRoot } from '../utils/project.js';
+import { getAppScaffoldEntries, toImportName } from '../utils/apps.js';
 
 function createCollector() {
   const entries = [];
@@ -26,25 +28,47 @@ async function fileExists(filePath) {
   }
 }
 
-async function runAppChecks(rootDir, config, collector) {
-  const apps = Array.isArray(config.apps) ? config.apps : [];
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
-  if (apps.length === 0) {
+async function runAppChecks(rootDir, config, collector, targetAppName = null) {
+  const apps = Array.isArray(config.apps) ? config.apps : [];
+  const declaredApps = new Map();
+
+  for (const app of apps) {
+    const appName = app?.name;
+    if (typeof appName === 'string' && appName.trim().length > 0) {
+      declaredApps.set(appName, app);
+    }
+  }
+
+  if (!targetAppName && apps.length === 0) {
     collector.warn('No apps declared in settings.apps.');
     return;
   }
 
-  collector.ok(`Declared apps: ${apps.map((app) => app.name).join(', ')}`);
+  if (!targetAppName) {
+    collector.ok(`Declared apps: ${apps.map((app) => app.name).join(', ')}`);
+  }
 
-  for (const app of apps) {
-    const appName = app?.name;
+  const routesFile = path.join(rootDir, 'routes.js');
+  const routesFileExists = await fileExists(routesFile);
+  const routesContent = routesFileExists ? await fs.readFile(routesFile, 'utf8') : '';
+  const targetApps = targetAppName ? [targetAppName] : apps;
+
+  for (const appEntry of targetApps) {
+    const appName = targetAppName || appEntry?.name;
+    const app = targetAppName ? declaredApps.get(appName) || null : appEntry;
     const mount = app?.mount;
     if (typeof appName !== 'string' || appName.trim().length === 0) {
-      collector.error(`Invalid app entry: ${JSON.stringify(app)}`);
+      collector.error(`Invalid app entry: ${JSON.stringify(appEntry)}`);
       continue;
     }
 
-    if (typeof mount !== 'string' || !mount.startsWith('/')) {
+    if (!app) {
+      collector.warn(`App "${appName}" is not declared in settings.apps.`);
+    } else if (typeof mount !== 'string' || !mount.startsWith('/')) {
       collector.error(`App "${appName}" has invalid mount "${String(mount)}" (must start with /).`);
     }
 
@@ -55,17 +79,37 @@ async function runAppChecks(rootDir, config, collector) {
       continue;
     }
 
-    const requiredFiles = ['routes.js', 'views.js', 'services.js', 'models.js', 'validators.js'];
-    for (const fileName of requiredFiles) {
-      const target = path.join(appRoot, fileName);
+    for (const entry of getAppScaffoldEntries(appName)) {
+      const target = path.join(rootDir, entry.target);
       if (!(await fileExists(target))) {
-        collector.warn(`App "${appName}" missing ${fileName}.`);
+        collector.warn(`App "${appName}" missing ${path.relative(appRoot, target)}.`);
       }
     }
 
-    const subscribersFile = path.join(appRoot, 'subscribers.js');
-    if (!(await fileExists(subscribersFile))) {
-      collector.warn(`App "${appName}" missing subscribers.js.`);
+    if (!app) {
+      continue;
+    }
+
+    if (config.autoMountApps === true) {
+      collector.ok(`App "${appName}" will be mounted automatically from settings.apps.`);
+      continue;
+    }
+
+    if (!routesFileExists) {
+      collector.warn(`Project routes.js is missing; app "${appName}" cannot be mounted centrally.`);
+      continue;
+    }
+
+    const importPath = `./apps/${appName}/routes.js`;
+    const importName = toImportName(appName);
+    const routePattern = new RegExp(`route\\.use\\([^\\n]*,\\s*${escapeRegExp(importName)}\\s*\\);`);
+
+    if (!routesContent.includes(importPath)) {
+      collector.warn(`Project routes.js is missing import for app "${appName}".`);
+    }
+
+    if (!routePattern.test(routesContent)) {
+      collector.warn(`Project routes.js is missing route.use(...) mount for app "${appName}".`);
     }
   }
 }
@@ -193,7 +237,12 @@ export async function runDoctor({
   projectRoot,
   failOnError = true,
   output = console,
+  appName = null,
 } = {}) {
+  if (appName) {
+    ensureValidName(appName, 'app');
+  }
+
   const resolvedRoot = await resolveProjectRoot(projectRoot || process.cwd());
   const collector = createCollector();
 
@@ -202,12 +251,17 @@ export async function runDoctor({
   const config = await loadProjectConfig(resolvedRoot);
   collector.ok(`Environment: ${config.env || 'development'}`);
 
-  await runAppChecks(resolvedRoot, config, collector);
-  await runStartupEntryChecks(resolvedRoot, config, collector);
-  runSecurityChecks(config, collector);
-  runAuthChecks(config, collector);
-  runApiChecks(config, collector);
-  await runTemplateChecks(resolvedRoot, config, collector);
+  if (appName) {
+    collector.ok(`Doctor scope: app "${appName}"`);
+    await runAppChecks(resolvedRoot, config, collector, appName);
+  } else {
+    await runAppChecks(resolvedRoot, config, collector);
+    await runStartupEntryChecks(resolvedRoot, config, collector);
+    runSecurityChecks(config, collector);
+    runAuthChecks(config, collector);
+    runApiChecks(config, collector);
+    await runTemplateChecks(resolvedRoot, config, collector);
+  }
 
   const summary = printSummary(collector.entries, output);
 

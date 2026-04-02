@@ -95,8 +95,11 @@ npm --prefix forum install</code></pre>
           <p>Create the main apps used in this documentation.</p>
           <pre><code>aegisnode createapp forums --project forum
 aegisnode createapp threads --project forum
-aegisnode createapp users --project forum</code></pre>
-          <p>Each app gets views, models, services, validators, subscribers, routes, and tests.</p>
+aegisnode createapp users --project forum
+aegisnode doctor --app users --project forum
+aegisnode fix --app users --project forum</code></pre>
+          <p>Each app gets views, models, services, validators, subscribers, routes, an app-local <code>utils.js</code>, and tests.</p>
+          <p>Use <code>aegisnode doctor --app &lt;app-name&gt;</code> to check one app for missing scaffold files and missing registration. Use <code>aegisnode fix --app &lt;app-name&gt;</code> to recreate the missing pieces without overwriting files that already exist.</p>
         </section>
 
         <section class="doc-section" id="run-dev">
@@ -110,6 +113,26 @@ aegisnode createapp users --project forum</code></pre>
             <strong>Important:</strong> in development use <code>aegisnode runserver</code>. Outside development use
             <code>node loader.cjs</code>. The framework now enforces this.
           </div>
+        </section>
+
+        <section class="doc-section" id="trust-proxy">
+          <div class="section-heading">
+            <p class="eyebrow">Reverse Proxy</p>
+            <h2>Enable Trust Proxy When HTTPS Ends Upstream</h2>
+          </div>
+          <p>
+            If the forum app sits behind Nginx, Apache, Passenger, or another reverse proxy that terminates HTTPS
+            before Node, set top-level <code>trustProxy</code> in <code>settings.js</code>.
+          </p>
+          <pre><code>export default {
+  trustProxy: 1,
+};</code></pre>
+          <p>
+            This is the AegisNode equivalent of Express <code>app.set('trust proxy', 1)</code>. It fixes
+            <code>req.secure</code>, <code>req.protocol</code>, secure cookies, client IP detection, and HTTPS-aware
+            auth checks behind the proxy.
+          </p>
+          <p>Prefer an exact value such as <code>1</code>, <code>'loopback'</code>, or a subnet string instead of <code>true</code>.</p>
         </section>
 
         <section class="doc-section" id="first-route">

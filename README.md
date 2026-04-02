@@ -43,6 +43,7 @@ It keeps the development model simple, but adds enough structure and tooling to 
 Core features:
 
 - CLI generators (`startproject`, `createapp`, `runserver`)
+- App scaffold repair command (`fix`)
 - Startup entry generator (`generateloader`)
 - Project health checker (`doctor`)
 - Dependency updater (`updatedeps`)
@@ -61,7 +62,7 @@ Core features:
 - Root route file `routes.js` (not `routes/` folder)
 - Automatic default confirmation page on `/` when no custom `/` route exists
 - App folder uses `views.js` (not `controllers/` folder)
-- `createapp` uses file modules: `views.js`, `models.js`, `validators.js`, `routes.js`, `subscribers.js`, `services.js`
+- `createapp` uses file modules: `views.js`, `models.js`, `validators.js`, `routes.js`, `subscribers.js`, `services.js`, `utils.js`
 - `createapp` also generates app tests in `apps/<app>/tests`
 - EJS templates configurable in `settings.js` with Django-style base layout flow
 - Built-in runtime helpers (`money`, `number`, `dateTime`, `timeElapsed`, `toObjectId`) + `jlive` bridge
@@ -90,22 +91,38 @@ npm --prefix blog install
 aegisnode runserver --project blog
 
 aegisnode createapp users --project blog
+aegisnode fix --app users --project blog
 aegisnode generate view profile --app users --project blog
 aegisnode generate route profile --app users --project blog
 aegisnode generateloader --project blog
 aegisnode doctor --project blog
+aegisnode doctor --app users --project blog
 aegisnode updatedeps --project blog
 ```
 
 `cd blog` is optional. You can run commands from parent folder with `--project blog`.
 
-`createapp`, `generate`, `runserver`, `generateloader`, `doctor`, and `updatedeps` are project-level commands.
+`createapp`, `fix`, `generate`, `runserver`, `generateloader`, `doctor`, and `updatedeps` are project-level commands.
 Run them from the project root; do not `cd` into `apps/<app>`.
 Startup mode rules:
 - Development (`env === development`): start with `aegisnode runserver` only.
 - Non-development (`env !== development`): start with `node loader.cjs` (or your process manager/host pointing to `loader.cjs`).
 - `node app.js` and `node loader.cjs` are rejected in development mode.
 - `aegisnode runserver` is rejected outside development mode.
+
+### Trust Proxy
+
+If your app runs behind Nginx, Apache, Passenger, or another reverse proxy that terminates HTTPS before the Node process, set top-level `trustProxy` in `settings.js`:
+
+```js
+export default {
+  trustProxy: 1,
+};
+```
+
+This is the AegisNode equivalent of `app.set('trust proxy', 1)` in raw Express. It makes `req.secure`, `req.protocol`, client IP detection, secure cookies, and HTTPS-aware auth logic behave correctly behind the proxy.
+
+Prefer an exact value such as `1`, `'loopback'`, or a subnet string instead of `true`.
 
 ### Deploy On Phusion Passenger
 
@@ -169,6 +186,26 @@ aegisnode doctor
 - Security baseline (`appSecret`, csrf/headers/ddos toggles)
 - Auth safety checks (JWT secret, OAuth2 `allowHttp` in production)
 - Template directory availability
+
+Run app-level scaffold checks for one app:
+
+```bash
+aegisnode doctor --app users
+```
+
+App-level doctor focuses on the named app:
+- Missing `views.js`, `models.js`, `services.js`, `validators.js`, `routes.js`, `subscribers.js`, `utils.js`
+- Missing generated test files under `apps/<app>/tests`
+- Missing `settings.apps` declaration for that app
+- Missing central `routes.js` import/mount when `autoMountApps` is off
+
+Repair a partially missing app scaffold:
+
+```bash
+aegisnode fix --app users
+```
+
+`fix` recreates missing default app files and tests without overwriting existing files. If the app is missing from `settings.apps` or central `routes.js`, it restores those registrations too.
 
 Regenerate project startup entry files if needed:
 
@@ -288,15 +325,23 @@ Each generated app usually contains:
 - `apps/<app>/views.js`
 - `apps/<app>/models.js`
 - `apps/<app>/services.js`
+- `apps/<app>/utils.js`
 - `apps/<app>/subscribers.js`
 - `apps/<app>/routes.js`
 
 Usage by file:
 - `views.js`: HTTP handlers (`req`, `res`, `next`). Default signature can be context-first: `handler({ service, validator, services, validators, ... }, req, res, next)`.
+  Keep `views.js` thin: prefer only the view class and its imports. Avoid defining extra local helper/utility functions in the view file. Move reusable pure logic to `utils.js` and app workflows to `services.js`.
 - `models.js`: data access layer only (SQL/NoSQL operations).
-- `services.js`: business logic layer; orchestrates models.
+- `services.js`: business logic layer; orchestrates models and uses injected runtime objects when needed.
+- `utils.js`: app-local pure utility functions. Use this for small reusable helpers that belong only to the app. Do not put DB access, request validation, or business workflows here.
+  `utils.js` is a plain module, not an injected runtime layer. If a utility needs `jlive`, `helpers`, `i18n`, or another injected runtime object, inject that object into a view/service/model first and pass it into the utility function as an argument.
 - `subscribers.js`: event listeners (for example `app.booted`, `ws.connection`, custom events).
 - `routes.js`: route mapping only (`route.get(...)`, `route.post(...)`, `route.use(...)`) to view handlers.
+
+Short rule for `utils.js` vs `services.js`:
+- Use `utils.js` for pure app-local helpers such as string formatting, slug generation, payload shaping, or small mappers.
+- Use `services.js` for application behavior: anything that coordinates models, injected runtime objects, or feature rules.
 
 Route modules are mapping-only (`register(route)`).
 Framework context is injected into handlers as first argument (when handler uses 4 args): `{ service, validator, services, models, validators, auth, mail, helpers, i18n, events, ... }`.

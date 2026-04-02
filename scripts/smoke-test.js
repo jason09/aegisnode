@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { startProject } from '../src/cli/commands/startproject.js';
 import { createApp } from '../src/cli/commands/createapp.js';
+import { runCli } from '../src/cli/index.js';
 import { generateArtifact } from '../src/cli/commands/generate.js';
 import { createKernel } from '../src/runtime/kernel.js';
 import { runServer } from '../src/cli/commands/runserver.js';
@@ -16,6 +17,7 @@ import { createAuthManager, normalizeAuthConfig } from '../src/runtime/auth.js';
 import { loadProjectConfig } from '../src/runtime/config.js';
 import { initializeDatabase, closeDatabase } from '../src/runtime/database.js';
 import { runDoctor } from '../src/cli/commands/doctor.js';
+import { runFixApp } from '../src/cli/commands/fixapp.js';
 import { runUpdateDependencies } from '../src/cli/commands/updatedeps.js';
 import { createHelpers } from '../src/runtime/helpers.js';
 
@@ -590,6 +592,7 @@ dkcqnJD4SGWVeG+KhA==
   await fs.access(path.join(projectRoot, 'apps', 'users', 'models.js'));
   await fs.access(path.join(projectRoot, 'apps', 'users', 'validators.js'));
   await fs.access(path.join(projectRoot, 'apps', 'users', 'services.js'));
+  await fs.access(path.join(projectRoot, 'apps', 'users', 'utils.js'));
   await fs.access(path.join(projectRoot, 'apps', 'users', 'subscribers.js'));
   await fs.access(path.join(projectRoot, 'apps', 'users', 'tests', 'models.test.js'));
   await fs.access(path.join(projectRoot, 'apps', 'users', 'tests', 'validators.test.js'));
@@ -605,6 +608,90 @@ dkcqnJD4SGWVeG+KhA==
   assert.equal(doctorReport.summary.errors, 0);
   const projectRoutesFile = await fs.readFile(path.join(projectRoot, 'routes.js'), 'utf8');
   assert.match(projectRoutesFile, /route\.use\((['"])\/users\1, users\);/);
+
+  await fs.unlink(path.join(projectRoot, 'apps', 'users', 'utils.js'));
+  await fs.unlink(path.join(projectRoot, 'apps', 'users', 'tests', 'routes.test.js'));
+  await fs.writeFile(
+    path.join(projectRoot, 'routes.js'),
+    projectRoutesFile
+      .replace(/import users from '\.\/apps\/users\/routes\.js';\n/, '')
+      .replace(/\s*route\.use\((['"])\/users\1, users\);\n/, '\n'),
+    'utf8',
+  );
+  const appDoctorRouteReport = await runDoctor({
+    projectRoot,
+    appName: 'users',
+    failOnError: false,
+    output: {
+      log() {},
+    },
+  });
+  assert.equal(
+    appDoctorRouteReport.entries.some((entry) => entry.message.includes('Project routes.js is missing import for app "users".')),
+    true,
+  );
+  assert.equal(
+    appDoctorRouteReport.entries.some((entry) => entry.message.includes('Project routes.js is missing route.use(...) mount for app "users".')),
+    true,
+  );
+
+  const settingsBeforeFix = await fs.readFile(path.join(projectRoot, 'settings.js'), 'utf8');
+  await fs.writeFile(
+    path.join(projectRoot, 'settings.js'),
+    settingsBeforeFix.replace(/\n\s*\{ name: "users", mount: "\/users" \},/, ''),
+    'utf8',
+  );
+
+  const appDoctorReport = await runDoctor({
+    projectRoot,
+    appName: 'users',
+    failOnError: false,
+    output: {
+      log() {},
+    },
+  });
+  assert.equal(appDoctorReport.summary.errors, 0);
+  assert.equal(
+    appDoctorReport.entries.some((entry) => entry.message.includes('App "users" is not declared in settings.apps.')),
+    true,
+  );
+  assert.equal(
+    appDoctorReport.entries.some((entry) => entry.message.includes('App "users" missing utils.js.')),
+    true,
+  );
+  assert.equal(
+    appDoctorReport.entries.some((entry) => entry.message.includes('App "users" missing tests/routes.test.js.')),
+    true,
+  );
+
+  const fixAppResult = await runFixApp({
+    appName: 'users',
+    projectRoot,
+  });
+  assert.equal(fixAppResult.registryUpdated, true);
+  assert.equal(fixAppResult.routesUpdated, true);
+  await fs.access(path.join(projectRoot, 'apps', 'users', 'utils.js'));
+  await fs.access(path.join(projectRoot, 'apps', 'users', 'tests', 'routes.test.js'));
+  const fixedSettingsFile = await fs.readFile(path.join(projectRoot, 'settings.js'), 'utf8');
+  assert.match(fixedSettingsFile, /\{ name: "users", mount: "\/users" \},/);
+  const fixedRoutesFile = await fs.readFile(path.join(projectRoot, 'routes.js'), 'utf8');
+  assert.match(fixedRoutesFile, /import users from '\.\/apps\/users\/routes\.js';/);
+  assert.match(fixedRoutesFile, /route\.use\((['"])\/users\1, users\);/);
+  await assert.doesNotReject(
+    () => runCli(['doctor', '--app', 'users', '--project', projectRoot]),
+  );
+  await assert.rejects(
+    () => runCli(['doctor', 'users', '--project', projectRoot]),
+    /Doctor app target must use --app <app-name>/,
+  );
+  await assert.doesNotReject(
+    () => runCli(['fix', '--app', 'users', '--project', projectRoot]),
+  );
+  await assert.rejects(
+    () => runCli(['fix', 'users', '--project', projectRoot]),
+    /Fix app target must use --app <app-name>/,
+  );
+
   await generateArtifact({
     type: 'view',
     name: 'profile',
