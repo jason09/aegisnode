@@ -1,7 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { ensureValidName, exists, writeFile } from '../utils/fs.js';
-import { toPascalCase } from '../utils/scaffolds.js';
+import { toPascalCase, withSourceExtension } from '../utils/scaffolds.js';
+import { getProjectSourceExtension } from '../utils/project.js';
+import { resolveSourceFile, resolveSourceIndexFile } from '../../utils/source-files.js';
 
 const SUPPORTED_TYPES = new Set(['view', 'controller', 'model', 'validator', 'dto', 'service', 'subscriber', 'route']);
 
@@ -22,12 +24,14 @@ function assertType(type) {
 }
 
 async function assertProjectRoot(projectRoot) {
-  const hasSingleSettings = await exists(path.join(projectRoot, 'settings.js'));
-  const hasLegacySettings = (await exists(path.join(projectRoot, 'settings', 'index.js')))
-    || (await exists(path.join(projectRoot, 'settings', 'apps.js')));
+  const hasSingleSettings = Boolean(resolveSourceFile(path.join(projectRoot, 'settings')));
+  const hasLegacySettings = Boolean(
+    resolveSourceIndexFile(path.join(projectRoot, 'settings'))
+    || resolveSourceFile(path.join(projectRoot, 'settings', 'apps')),
+  );
 
   if (!hasSingleSettings && !hasLegacySettings) {
-    throw new Error('Not an AegisNode project root: missing settings.js');
+    throw new Error('Not an AegisNode project root: missing settings.js/settings.ts');
   }
 }
 
@@ -110,35 +114,35 @@ function renderSubscriber(name, appName) {
 `;
 }
 
-async function getAppRoutesFile(appRoot) {
-  const primary = path.join(appRoot, 'routes.js');
-  if (await exists(primary)) {
+async function getAppRoutesFile(appRoot, sourceExtension) {
+  const primary = resolveSourceFile(path.join(appRoot, 'routes'), [sourceExtension]) || resolveSourceFile(path.join(appRoot, 'routes'));
+  if (primary && await exists(primary)) {
     return primary;
   }
 
-  const legacy = path.join(appRoot, 'routes', 'index.js');
-  if (await exists(legacy)) {
+  const legacy = resolveSourceIndexFile(path.join(appRoot, 'routes'), [sourceExtension]) || resolveSourceIndexFile(path.join(appRoot, 'routes'));
+  if (legacy && await exists(legacy)) {
     return legacy;
   }
 
-  throw new Error(`Missing app routes file in ${appRoot}. Expected routes.js or routes/index.js`);
+  throw new Error(`Missing app routes file in ${appRoot}. Expected routes${sourceExtension} or routes/index${sourceExtension}`);
 }
 
-async function appendRouteToApp({ appRoot, routeName }) {
-  const routesFile = await getAppRoutesFile(appRoot);
-  const usesFlatRoutesFile = path.basename(routesFile) === 'routes.js';
-  const flatViewPath = path.join(appRoot, `${routeName}.view.js`);
-  const nestedViewPath = path.join(appRoot, 'views', `${routeName}.view.js`);
+async function appendRouteToApp({ appRoot, routeName, sourceExtension }) {
+  const routesFile = await getAppRoutesFile(appRoot, sourceExtension);
+  const usesFlatRoutesFile = path.basename(routesFile) === withSourceExtension('routes', sourceExtension);
+  const flatViewPath = path.join(appRoot, `${routeName}.view${sourceExtension}`);
+  const nestedViewPath = path.join(appRoot, 'views', `${routeName}.view${sourceExtension}`);
 
   let importPath = null;
   if (await exists(flatViewPath)) {
     importPath = usesFlatRoutesFile
-      ? `./${routeName}.view.js`
-      : `../${routeName}.view.js`;
+      ? `./${routeName}.view${sourceExtension}`
+      : `../${routeName}.view${sourceExtension}`;
   } else if (await exists(nestedViewPath)) {
     importPath = usesFlatRoutesFile
-      ? `./views/${routeName}.view.js`
-      : `../views/${routeName}.view.js`;
+      ? `./views/${routeName}.view${sourceExtension}`
+      : `../views/${routeName}.view${sourceExtension}`;
   } else {
     throw new Error(`Missing view for route generation: ${flatViewPath} (or ${nestedViewPath}). Create it first with generate view ${routeName}.`);
   }
@@ -193,18 +197,18 @@ async function appendRouteToApp({ appRoot, routeName }) {
   return routesFile;
 }
 
-function resolveTarget(appRoot, type, name) {
+function resolveTarget(appRoot, type, name, sourceExtension) {
   switch (type) {
     case 'view':
-      return path.join(appRoot, `${name}.view.js`);
+      return path.join(appRoot, `${name}.view${sourceExtension}`);
     case 'model':
-      return path.join(appRoot, `${name}.model.js`);
+      return path.join(appRoot, `${name}.model${sourceExtension}`);
     case 'service':
-      return path.join(appRoot, `${name}.service.js`);
+      return path.join(appRoot, `${name}.service${sourceExtension}`);
     case 'validator':
-      return path.join(appRoot, `${name}.validator.js`);
+      return path.join(appRoot, `${name}.validator${sourceExtension}`);
     case 'subscriber':
-      return path.join(appRoot, `${name}.subscriber.js`);
+      return path.join(appRoot, `${name}.subscriber${sourceExtension}`);
     default:
       throw new Error(`Unsupported type: ${type}`);
   }
@@ -248,14 +252,15 @@ export async function generateArtifact({ type, name, appName, projectRoot }) {
   const resolvedRoot = path.resolve(projectRoot);
   await assertProjectRoot(resolvedRoot);
   const appRoot = await assertAppRoot(resolvedRoot, appName);
+  const sourceExtension = getProjectSourceExtension(resolvedRoot);
 
   if (normalizedType === 'route') {
-    const routesFile = await appendRouteToApp({ appRoot, routeName: name });
+    const routesFile = await appendRouteToApp({ appRoot, routeName: name, sourceExtension });
     console.log(`Generated route /${name} in ${routesFile}`);
     return;
   }
 
-  const targetFile = resolveTarget(appRoot, normalizedType, name);
+  const targetFile = resolveTarget(appRoot, normalizedType, name, sourceExtension);
   if (await exists(targetFile)) {
     throw new Error(`File already exists: ${targetFile}`);
   }

@@ -5,7 +5,7 @@ import https from 'https';
 import { AsyncLocalStorage } from 'async_hooks';
 import crypto from 'crypto';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import express from 'express';
 import ejs from 'ejs';
 import helmet from 'helmet';
@@ -23,6 +23,13 @@ import { runLoaders } from './loaders.js';
 import { createRuntimeHelpers } from './helpers.js';
 import { createUploadManager, isMultipartRequestContentType, normalizeUploadsConfig } from './upload.js';
 import { createMailManager, normalizeMailConfig } from './mail.js';
+import { importProjectModule } from './typescript.js';
+import {
+  hasNamedSourceSuffix,
+  isSourceFileName,
+  resolveSourceFile,
+  resolveSourceIndexFile,
+} from '../utils/source-files.js';
 
 const ROUTE_DEFINITION = 'aegis:routes';
 const PROJECT_ROUTE_DEFINITION = 'aegis:project-routes';
@@ -33,7 +40,7 @@ const EMPTY_ROUTE_CONTEXT = Object.freeze({});
 const REQUEST_I18N_CONTEXT = new AsyncLocalStorage();
 
 function exists(filePath) {
-  return fs.existsSync(filePath);
+  return typeof filePath === 'string' && fs.existsSync(filePath);
 }
 
 function isRouterInstance(value) {
@@ -653,7 +660,7 @@ const DB_LIBRARY_PATTERN = /\b(querymesh|mongoose|pg|postgres|postgresql|mysql|m
 const IMPORT_FROM_PATTERN = /import\s+[\s\S]*?\sfrom\s+['"]([^'"]+)['"]/g;
 const IMPORT_SIDE_EFFECT_PATTERN = /import\s+['"]([^'"]+)['"]/g;
 const REQUIRE_PATTERN = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
-const MODEL_IMPORT_PATH_PATTERN = /(?:^|\/)(models(?:\.js)?|[^/]+\.model(?:\.js)?)$/i;
+const MODEL_IMPORT_PATH_PATTERN = /(?:^|\/)(models(?:\.(?:js|ts))?|[^/]+\.model(?:\.(?:js|ts))?)$/i;
 
 function extractImportSpecifiers(source) {
   const imports = [];
@@ -693,26 +700,26 @@ async function collectStrictLayerFiles(appRoot) {
   const routeFiles = [];
   const serviceFiles = [];
 
-  const routesFile = path.join(appRoot, 'routes.js');
+  const routesFile = resolveSourceFile(path.join(appRoot, 'routes'));
   if (exists(routesFile)) {
     routeFiles.push(routesFile);
   }
 
   const routesDir = path.join(appRoot, 'routes');
   for (const fileName of await loadDirectoryFiles(routesDir)) {
-    if (!fileName.endsWith('.js')) {
+    if (!isSourceFileName(fileName)) {
       continue;
     }
     routeFiles.push(path.join(routesDir, fileName));
   }
 
-  const servicesFile = path.join(appRoot, 'services.js');
+  const servicesFile = resolveSourceFile(path.join(appRoot, 'services'));
   if (exists(servicesFile)) {
     serviceFiles.push(servicesFile);
   }
 
   for (const fileName of await loadDirectoryFiles(appRoot)) {
-    if (!fileName.endsWith('.service.js')) {
+    if (!hasNamedSourceSuffix(fileName, '.service')) {
       continue;
     }
     serviceFiles.push(path.join(appRoot, fileName));
@@ -720,7 +727,7 @@ async function collectStrictLayerFiles(appRoot) {
 
   const servicesDir = path.join(appRoot, 'services');
   for (const fileName of await loadDirectoryFiles(servicesDir)) {
-    if (!fileName.endsWith('.js')) {
+    if (!isSourceFileName(fileName)) {
       continue;
     }
     serviceFiles.push(path.join(servicesDir, fileName));
@@ -1829,8 +1836,7 @@ function extractCsrfToken(req, csrfConfig) {
 }
 
 async function importModule(filePath) {
-  const moduleUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}`;
-  return import(moduleUrl);
+  return importProjectModule(filePath);
 }
 
 export function defineRoutes(register) {
@@ -2357,7 +2363,7 @@ async function registerControllers({ appName, appRoot, container, logger }) {
     const files = await loadDirectoryFiles(directory);
 
     for (const fileName of files) {
-      if (!fileName.endsWith('.js')) {
+      if (!isSourceFileName(fileName)) {
         continue;
       }
 
@@ -2370,23 +2376,23 @@ async function registerControllers({ appName, appRoot, container, logger }) {
     }
   }
 
-  const singleFiles = ['controllers.js', 'views.js'];
-  for (const fileName of singleFiles) {
-    const filePath = path.join(appRoot, fileName);
+  const singleFiles = ['controllers', 'views'];
+  for (const baseName of singleFiles) {
+    const filePath = resolveSourceFile(path.join(appRoot, baseName));
     if (!exists(filePath)) {
       continue;
     }
 
     const loaded = await importModule(filePath);
     const controller = loaded.default ?? loaded;
-    const controllerName = normalizeControllerName(fileName);
+    const controllerName = normalizeControllerName(path.basename(filePath));
     container.set(`controller:${appName}.${controllerName}`, controller);
     logger.debug('Controller registered: controller:%s.%s', appName, controllerName);
   }
 }
 
 async function registerModels({ appName, appRoot, container, logger }) {
-  const modelsFile = path.join(appRoot, 'models.js');
+  const modelsFile = resolveSourceFile(path.join(appRoot, 'models'));
   if (exists(modelsFile)) {
     const loaded = await importModule(modelsFile);
     const exported = loaded.default ?? loaded;
@@ -2403,7 +2409,7 @@ async function registerModels({ appName, appRoot, container, logger }) {
 
   const rootFiles = await loadDirectoryFiles(appRoot);
   for (const fileName of rootFiles) {
-    if (!fileName.endsWith('.model.js')) {
+    if (!hasNamedSourceSuffix(fileName, '.model')) {
       continue;
     }
 
@@ -2419,7 +2425,7 @@ async function registerModels({ appName, appRoot, container, logger }) {
   const files = await loadDirectoryFiles(modelsDir);
 
   for (const fileName of files) {
-    if (!fileName.endsWith('.js')) {
+    if (!isSourceFileName(fileName)) {
       continue;
     }
 
@@ -2433,7 +2439,7 @@ async function registerModels({ appName, appRoot, container, logger }) {
 }
 
 async function registerValidators({ appName, appRoot, container, logger }) {
-  const validatorsFile = path.join(appRoot, 'validators.js');
+  const validatorsFile = resolveSourceFile(path.join(appRoot, 'validators'));
   if (exists(validatorsFile)) {
     const loaded = await importModule(validatorsFile);
     const exported = loaded.default ?? loaded;
@@ -2450,7 +2456,7 @@ async function registerValidators({ appName, appRoot, container, logger }) {
 
   const rootFiles = await loadDirectoryFiles(appRoot);
   for (const fileName of rootFiles) {
-    if (!fileName.endsWith('.validator.js')) {
+    if (!hasNamedSourceSuffix(fileName, '.validator')) {
       continue;
     }
 
@@ -2466,7 +2472,7 @@ async function registerValidators({ appName, appRoot, container, logger }) {
   const files = await loadDirectoryFiles(validatorsDir);
 
   for (const fileName of files) {
-    if (!fileName.endsWith('.js')) {
+    if (!isSourceFileName(fileName)) {
       continue;
     }
 
@@ -2480,7 +2486,7 @@ async function registerValidators({ appName, appRoot, container, logger }) {
 }
 
 async function registerServices({ appName, appRoot, container, logger }) {
-  const servicesFile = path.join(appRoot, 'services.js');
+  const servicesFile = resolveSourceFile(path.join(appRoot, 'services'));
   if (exists(servicesFile)) {
     const loaded = await importModule(servicesFile);
     const exported = loaded.default ?? loaded;
@@ -2495,11 +2501,25 @@ async function registerServices({ appName, appRoot, container, logger }) {
     }
   }
 
+  const rootFiles = await loadDirectoryFiles(appRoot);
+  for (const fileName of rootFiles) {
+    if (!hasNamedSourceSuffix(fileName, '.service')) {
+      continue;
+    }
+
+    const filePath = path.join(appRoot, fileName);
+    const loaded = await importModule(filePath);
+    const service = loaded.default ?? loaded;
+    const serviceName = normalizeServiceName(fileName);
+    container.set(`service:${appName}.${serviceName}`, service);
+    logger.debug('Service registered: service:%s.%s', appName, serviceName);
+  }
+
   const servicesDir = path.join(appRoot, 'services');
   const files = await loadDirectoryFiles(servicesDir);
 
   for (const fileName of files) {
-    if (!fileName.endsWith('.js')) {
+    if (!isSourceFileName(fileName)) {
       continue;
     }
 
@@ -2513,9 +2533,8 @@ async function registerServices({ appName, appRoot, container, logger }) {
 }
 
 async function registerSubscribers({ appName, appRoot, context, logger }) {
-  const subscribersFile = exists(path.join(appRoot, 'subscribers.js'))
-    ? path.join(appRoot, 'subscribers.js')
-    : path.join(appRoot, 'subscribers', 'index.js');
+  const subscribersFile = resolveSourceFile(path.join(appRoot, 'subscribers'))
+    || resolveSourceIndexFile(path.join(appRoot, 'subscribers'));
 
   if (!exists(subscribersFile)) {
     return;
@@ -2531,9 +2550,8 @@ async function registerSubscribers({ appName, appRoot, context, logger }) {
 }
 
 async function mountAppRoutes({ appDefinition, appRoot, context, expressApp, routeContext = null }) {
-  const routesFile = exists(path.join(appRoot, 'routes.js'))
-    ? path.join(appRoot, 'routes.js')
-    : path.join(appRoot, 'routes', 'index.js');
+  const routesFile = resolveSourceFile(path.join(appRoot, 'routes'))
+    || resolveSourceIndexFile(path.join(appRoot, 'routes'));
   if (!exists(routesFile)) {
     return;
   }
@@ -2599,9 +2617,8 @@ async function mountAppRoutes({ appDefinition, appRoot, context, expressApp, rou
 }
 
 async function loadProjectRoutes(rootDir) {
-  const routesFile = exists(path.join(rootDir, 'routes.js'))
-    ? path.join(rootDir, 'routes.js')
-    : path.join(rootDir, 'routes', 'index.js');
+  const routesFile = resolveSourceFile(path.join(rootDir, 'routes'))
+    || resolveSourceIndexFile(path.join(rootDir, 'routes'));
 
   if (!exists(routesFile)) {
     return null;

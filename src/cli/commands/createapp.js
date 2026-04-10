@@ -1,5 +1,5 @@
 import { ensureValidName, normalizeMountPath } from '../utils/fs.js';
-import { resolveProjectRoot } from '../utils/project.js';
+import { getProjectSourceExtension, resolveProjectRoot } from '../utils/project.js';
 import {
   detectSettingsMode,
   ensureAppScaffold,
@@ -12,6 +12,7 @@ export async function createApp({ appName, projectRoot, mount }) {
   ensureValidName(appName, 'app');
 
   const resolvedRoot = await resolveProjectRoot(projectRoot);
+  const sourceExtension = getProjectSourceExtension(resolvedRoot);
   const settingsMode = await detectSettingsMode(resolvedRoot);
   const normalizedMount = normalizeMountPath(mount || `/${appName}`);
   const existingApps = await readAppsConfig(settingsMode);
@@ -20,9 +21,9 @@ export async function createApp({ appName, projectRoot, mount }) {
     throw new Error(`App "${appName}" already exists in project settings`);
   }
 
-  await ensureAppScaffold(resolvedRoot, appName);
+  await ensureAppScaffold(resolvedRoot, appName, { sourceExtension });
   await updateAppRegistry(resolvedRoot, [...existingApps, { name: appName, mount: normalizedMount }], settingsMode);
-  await updateProjectRoutesFile(resolvedRoot, appName, normalizedMount);
+  await updateProjectRoutesFile(resolvedRoot, appName, normalizedMount, sourceExtension);
 
   console.log(`App "${appName}" created at ${resolvedRoot}/apps/${appName}`);
 }

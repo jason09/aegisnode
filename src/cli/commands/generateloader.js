@@ -1,7 +1,7 @@
 import path from 'path';
 import { exists, writeFile } from '../utils/fs.js';
-import { resolveProjectRoot } from '../utils/project.js';
-import { renderProjectAppJs, renderProjectLoaderCjs } from '../utils/scaffolds.js';
+import { getProjectSourceExtension, resolveProjectRoot } from '../utils/project.js';
+import { renderProjectAppJs, renderProjectLoaderCjs, withSourceExtension } from '../utils/scaffolds.js';
 
 async function ensureStartupFile(rootDir, fileName, content, output) {
   const target = path.join(rootDir, fileName);
@@ -20,8 +20,14 @@ export async function runGenerateLoader({
   output = console,
 } = {}) {
   const resolvedRoot = await resolveProjectRoot(projectRoot || process.cwd());
-  const createdApp = await ensureStartupFile(resolvedRoot, 'app.js', renderProjectAppJs(), output);
-  const createdLoader = await ensureStartupFile(resolvedRoot, 'loader.cjs', renderProjectLoaderCjs(), output);
+  const sourceExtension = getProjectSourceExtension(resolvedRoot);
+  const createdApp = await ensureStartupFile(
+    resolvedRoot,
+    withSourceExtension('app', sourceExtension),
+    renderProjectAppJs(),
+    output,
+  );
+  const createdLoader = await ensureStartupFile(resolvedRoot, 'loader.cjs', renderProjectLoaderCjs(sourceExtension), output);
 
   if (!createdApp && !createdLoader) {
     output.log(`Startup entry files already exist in ${resolvedRoot}`);

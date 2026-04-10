@@ -11,7 +11,7 @@ function printHelp() {
   console.log(`AegisNode CLI
 
 Usage:
-  aegisnode startproject <project-name>
+  aegisnode startproject <project-name> [--typescript]
   aegisnode createapp <app-name> [--project <path>] [--mount </path>]
   aegisnode fix [--app <app-name>] [--project <path>]
   aegisnode generate <type> <name> --app <app-name> [--project <path>]
@@ -22,6 +22,7 @@ Usage:
 
 Examples:
   aegisnode startproject blog
+  aegisnode startproject blog --typescript
   cd blog
   npm install
   aegisnode runserver
@@ -70,6 +71,11 @@ function parseFlags(tokens) {
       continue;
     }
 
+    if (token === '--typescript' || token === '--ts') {
+      flags.typescript = true;
+      continue;
+    }
+
     if (token === '-h' || token === '--help') {
       flags.help = true;
       continue;
@@ -101,7 +107,11 @@ export async function runCli(argv) {
       if (!projectName) {
         throw new Error('Missing project name. Usage: aegisnode startproject <project-name>');
       }
-      await startProject({ projectName, cwd: process.cwd() });
+      await startProject({
+        projectName,
+        cwd: process.cwd(),
+        typescript: flags.typescript === true,
+      });
       return;
     }
 

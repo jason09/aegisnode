@@ -1,6 +1,7 @@
 import path from 'path';
 import { ensureValidName, normalizeMountPath } from '../utils/fs.js';
-import { resolveProjectRoot } from '../utils/project.js';
+import { getProjectSourceExtension, resolveProjectRoot } from '../utils/project.js';
+import { withSourceExtension } from '../utils/scaffolds.js';
 import {
   detectSettingsMode,
   ensureAppScaffold,
@@ -17,12 +18,16 @@ export async function runFixApp({ appName, projectRoot, mount } = {}) {
   ensureValidName(appName, 'app');
 
   const resolvedRoot = await resolveProjectRoot(projectRoot || process.cwd());
+  const sourceExtension = getProjectSourceExtension(resolvedRoot);
   const settingsMode = await detectSettingsMode(resolvedRoot);
   const existingApps = await readAppsConfig(settingsMode);
   const existingApp = existingApps.find((entry) => entry.name === appName) || null;
   const appMount = existingApp?.mount || normalizeMountPath(mount || `/${appName}`);
 
-  const scaffoldResult = await ensureAppScaffold(resolvedRoot, appName, { overwrite: false });
+  const scaffoldResult = await ensureAppScaffold(resolvedRoot, appName, {
+    overwrite: false,
+    sourceExtension,
+  });
 
   let registryUpdated = false;
   if (!existingApp) {
@@ -34,7 +39,7 @@ export async function runFixApp({ appName, projectRoot, mount } = {}) {
     registryUpdated = true;
   }
 
-  const routesResult = await updateProjectRoutesFile(resolvedRoot, appName, appMount);
+  const routesResult = await updateProjectRoutesFile(resolvedRoot, appName, appMount, sourceExtension);
   const relativeWritten = scaffoldResult.written.map((target) => path.relative(resolvedRoot, target));
 
   if (relativeWritten.length === 0 && !registryUpdated && !routesResult.updatedImport && !routesResult.updatedRoute) {
@@ -48,7 +53,7 @@ export async function runFixApp({ appName, projectRoot, mount } = {}) {
       console.log(`Added app "${appName}" to settings.apps with mount ${appMount}`);
     }
     if (routesResult.updatedImport || routesResult.updatedRoute) {
-      console.log(`Updated routes.js registration for app "${appName}"`);
+      console.log(`Updated ${path.basename(routesResult.routesFile || withSourceExtension('routes', sourceExtension))} registration for app "${appName}"`);
     }
   }
 

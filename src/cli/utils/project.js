@@ -1,16 +1,20 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { exists } from './fs.js';
+import { detectProjectSourceExtension, resolveSourceFile, resolveSourceIndexFile } from '../../utils/source-files.js';
 
 export async function hasRoutesFile(projectRoot) {
-  return (await exists(path.join(projectRoot, 'routes.js')))
-    || (await exists(path.join(projectRoot, 'routes', 'index.js')));
+  return Boolean(
+    resolveSourceFile(path.join(projectRoot, 'routes'))
+    || resolveSourceIndexFile(path.join(projectRoot, 'routes')),
+  );
 }
 
 export async function hasSettingsFile(projectRoot) {
-  return (await exists(path.join(projectRoot, 'settings.js')))
-    || (await exists(path.join(projectRoot, 'settings', 'index.js')))
-    || (await exists(path.join(projectRoot, 'settings', 'apps.js')));
+  return Boolean(
+    resolveSourceFile(path.join(projectRoot, 'settings'))
+    || resolveSourceIndexFile(path.join(projectRoot, 'settings'))
+    || resolveSourceFile(path.join(projectRoot, 'settings', 'apps')),
+  );
 }
 
 export async function isProjectRoot(projectRoot) {
@@ -64,4 +68,8 @@ export async function resolveProjectRoot(projectRootHint) {
   }
 
   throw new Error(`Could not find an AegisNode project from ${startDir}. Run inside project or use --project <path>.`);
+}
+
+export function getProjectSourceExtension(projectRoot) {
+  return detectProjectSourceExtension(projectRoot);
 }

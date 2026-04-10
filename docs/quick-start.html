@@ -82,9 +82,11 @@
           <pre><code>npm install -g aegisnode
 
 aegisnode startproject forum
+aegisnode startproject forum-ts --typescript
 npm --prefix forum install</code></pre>
           <p>The scaffold gives you <code>app.js</code>, <code>loader.cjs</code>, <code>settings.js</code>, <code>routes.js</code>, and a generated <code>.env</code> with <code>APP_SECRET</code>. The generated <code>settings.js</code> also embeds the same secret as a fallback literal.</p>
-          <p>If <code>loader.cjs</code> or <code>app.js</code> is missing later, run <code>aegisnode generateloader --project forum</code> to restore the startup entry files.</p>
+          <p>Use <code>--typescript</code> when you want the scaffold to generate <code>app.ts</code>, <code>settings.ts</code>, <code>routes.ts</code>, app <code>*.ts</code> files, and <code>tsconfig.json</code>.</p>
+          <p>If <code>loader.cjs</code> or the main app entry file is missing later, run <code>aegisnode generateloader --project forum</code> to restore the startup entry files.</p>
         </section>
 
         <section class="doc-section" id="generate-apps">
@@ -98,7 +100,7 @@ aegisnode createapp threads --project forum
 aegisnode createapp users --project forum
 aegisnode doctor --app users --project forum
 aegisnode fix --app users --project forum</code></pre>
-          <p>Each app gets views, models, services, validators, subscribers, routes, an app-local <code>utils.js</code>, and tests.</p>
+          <p>Each app gets views, models, services, validators, subscribers, routes, an app-local <code>utils.js</code>, and tests. In TypeScript mode those become <code>.ts</code> files, including generated tests like <code>models.test.ts</code>.</p>
           <p>Use <code>aegisnode doctor --app &lt;app-name&gt;</code> to check one app for missing scaffold files and missing registration. Use <code>aegisnode fix --app &lt;app-name&gt;</code> to recreate the missing pieces without overwriting files that already exist.</p>
         </section>
 
@@ -152,6 +154,7 @@ export default {
     route.use('/users', users);
   },
 };</code></pre>
+          <p>In a TypeScript project, use the same imports with <code>.ts</code> extensions instead of <code>.js</code>.</p>
         </section>
 
         <div class="page-nav">

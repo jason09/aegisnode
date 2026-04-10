@@ -6,31 +6,42 @@ export function toPascalCase(value) {
     .join('');
 }
 
+export function withSourceExtension(baseName, extension = '.js') {
+  return `${baseName}${extension}`;
+}
+
 function renderAppEntries(apps, indent = '  ') {
   return apps
     .map((app) => `${indent}{ name: ${JSON.stringify(app.name)}, mount: ${JSON.stringify(app.mount)} },`)
     .join('\n');
 }
 
-export function renderProjectPackageJson(projectName) {
-  return `${JSON.stringify(
-    {
-      name: projectName,
-      version: '1.0.0',
-      private: true,
-      type: 'module',
-      scripts: {
-        dev: 'aegisnode runserver',
-        start: 'node loader.cjs',
-        test: 'node --test',
-      },
-      dependencies: {
-        aegisnode: '^0.1.0',
-      },
+export function renderProjectPackageJson(projectName, { typescript = false } = {}) {
+  const packageJson = {
+    name: projectName,
+    version: '1.0.0',
+    private: true,
+    type: 'module',
+    scripts: {
+      dev: 'aegisnode runserver',
+      start: 'node loader.cjs',
+      test: typescript ? 'node --import tsx/esm --test' : 'node --test',
     },
-    null,
-    2,
-  )}\n`;
+    dependencies: {
+      aegisnode: '^0.1.0',
+    },
+  };
+
+  if (typescript) {
+    packageJson.scripts.typecheck = 'tsc --noEmit';
+    packageJson.devDependencies = {
+      '@types/node': '^24.0.0',
+      tsx: '^4.21.0',
+      typescript: '^5.9.3',
+    };
+  }
+
+  return `${JSON.stringify(packageJson, null, 2)}\n`;
 }
 
 export function renderProjectAppJs() {
@@ -45,12 +56,50 @@ runProject({ rootDir: __dirname });
 `;
 }
 
-export function renderProjectLoaderCjs() {
+export function renderProjectLoaderCjs(sourceExtension = '.js') {
+  if (sourceExtension === '.ts') {
+    return `import('aegisnode').then(async ({ registerTypeScriptRuntime }) => {
+  await registerTypeScriptRuntime();
+  return import('./app.ts');
+}).catch((error) => {
+  console.error(error?.stack || error?.message || String(error));
+  process.exitCode = 1;
+});
+`;
+  }
+
   return `import('./app.js').catch((error) => {
   console.error(error?.stack || error?.message || String(error));
   process.exitCode = 1;
 });
 `;
+}
+
+export function renderTsConfig() {
+  return `${JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'NodeNext',
+        moduleResolution: 'NodeNext',
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+        forceConsistentCasingInFileNames: true,
+        noEmit: true,
+        allowImportingTsExtensions: true,
+        types: ['node'],
+      },
+      include: [
+        'app.ts',
+        'settings.ts',
+        'routes.ts',
+        'apps/**/*.ts',
+      ],
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 export function renderProjectSettings(projectName, apps, appSecret = '') {
@@ -177,7 +226,7 @@ export function renderController(appName) {
   return renderView(appName);
 }
 
-export function renderAppViewsFile(appName) {
+export function renderAppViewsFile(appName, sourceExtension = '.js') {
   const className = `${toPascalCase(appName)}View`;
   return `class ${className} {
   static home(_context, req, res, next) {
@@ -470,9 +519,9 @@ export default {
 `;
 }
 
-export function renderAppRoutes(appName) {
+export function renderAppRoutes(appName, sourceExtension = '.js') {
   const viewClass = `${toPascalCase(appName)}View`;
-  return `import ${viewClass} from './views.js';
+  return `import ${viewClass} from './views${sourceExtension}';
 
 export default {
   appName: ${JSON.stringify(appName)},
@@ -492,10 +541,10 @@ export default {
 `;
 }
 
-export function renderAppModelTest(appName) {
+export function renderAppModelTest(appName, sourceExtension = '.js') {
   return `import test from 'node:test';
 import assert from 'node:assert/strict';
-import models from '../models.js';
+import models from '../models${sourceExtension}';
 
 test('${appName} model exposes basic CRUD methods', async () => {
   const Model = models[${JSON.stringify(appName)}];
@@ -517,10 +566,10 @@ test('${appName} model exposes basic CRUD methods', async () => {
 `;
 }
 
-export function renderAppValidatorTest(appName) {
+export function renderAppValidatorTest(appName, sourceExtension = '.js') {
   return `import test from 'node:test';
 import assert from 'node:assert/strict';
-import validators from '../validators.js';
+import validators from '../validators${sourceExtension}';
 
 test('${appName} validator validates id and payload', () => {
   const Validator = validators[${JSON.stringify(appName)}];
@@ -537,10 +586,10 @@ test('${appName} validator validates id and payload', () => {
 `;
 }
 
-export function renderAppServiceTest(appName) {
+export function renderAppServiceTest(appName, sourceExtension = '.js') {
   return `import test from 'node:test';
 import assert from 'node:assert/strict';
-import services from '../services.js';
+import services from '../services${sourceExtension}';
 
 test('${appName} service delegates to model layer', async () => {
   const Service = services[${JSON.stringify(appName)}];
@@ -580,10 +629,10 @@ test('${appName} service delegates to model layer', async () => {
 `;
 }
 
-export function renderAppRoutesTest(appName) {
+export function renderAppRoutesTest(appName, sourceExtension = '.js') {
   return `import test from 'node:test';
 import assert from 'node:assert/strict';
-import routes from '../routes.js';
+import routes from '../routes${sourceExtension}';
 
 test('${appName} routes register expected CRUD endpoints', () => {
   const calls = [];

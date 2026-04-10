@@ -136,6 +136,7 @@ async function main() {
   const dotenvSandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-dotenv-'));
   const httpsSandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-https-'));
   const proxySandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-proxy-'));
+  const typescriptSandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-ts-'));
 
   await startProject({ projectName, cwd: sandboxRoot });
   const generatedProjectEnv = await fs.readFile(path.join(projectRoot, '.env'), 'utf8');
@@ -154,6 +155,66 @@ async function main() {
     }),
     /started with "aegisnode runserver"/,
   );
+
+  const tsProjectName = 'forumts';
+  const tsProjectRoot = path.join(typescriptSandboxRoot, tsProjectName);
+  await startProject({ projectName: tsProjectName, cwd: typescriptSandboxRoot, typescript: true });
+  await fs.access(path.join(tsProjectRoot, 'app.ts'));
+  await fs.access(path.join(tsProjectRoot, 'settings.ts'));
+  await fs.access(path.join(tsProjectRoot, 'routes.ts'));
+  await fs.access(path.join(tsProjectRoot, 'tsconfig.json'));
+  const tsPackageJson = JSON.parse(await fs.readFile(path.join(tsProjectRoot, 'package.json'), 'utf8'));
+  assert.equal(tsPackageJson.scripts.test, 'node --import tsx/esm --test');
+  assert.equal(tsPackageJson.scripts.typecheck, 'tsc --noEmit');
+  assert.equal(tsPackageJson.devDependencies.tsx, '^4.21.0');
+  assert.equal(tsPackageJson.devDependencies.typescript, '^5.9.3');
+  const tsConfig = await loadProjectConfig(tsProjectRoot);
+  assert.equal(tsConfig.appName, 'forumts');
+  await createApp({
+    appName: 'users',
+    projectRoot: tsProjectRoot,
+    mount: '/users',
+  });
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'routes.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'views.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'models.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'validators.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'services.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'utils.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'subscribers.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'tests', 'models.test.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'tests', 'validators.test.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'tests', 'services.test.ts'));
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'tests', 'routes.test.ts'));
+  await generateArtifact({
+    type: 'view',
+    name: 'profile',
+    appName: 'users',
+    projectRoot: tsProjectRoot,
+  });
+  await fs.access(path.join(tsProjectRoot, 'apps', 'users', 'profile.view.ts'));
+  await generateArtifact({
+    type: 'route',
+    name: 'profile',
+    appName: 'users',
+    projectRoot: tsProjectRoot,
+  });
+  const tsUsersRoutesFile = await fs.readFile(path.join(tsProjectRoot, 'apps', 'users', 'routes.ts'), 'utf8');
+  assert.match(tsUsersRoutesFile, /import ProfileView from '\.\/profile\.view\.ts';/);
+  assert.match(tsUsersRoutesFile, /route\.get\('\/profile', ProfileView\.index\);/);
+  const tsDoctorReport = await runDoctor({
+    projectRoot: tsProjectRoot,
+    failOnError: true,
+    output: {
+      log() {},
+    },
+  });
+  assert.equal(tsDoctorReport.summary.errors, 0);
+  const tsServer = await runServer({
+    projectRoot: tsProjectRoot,
+    port: 0,
+  });
+  await tsServer.stop();
 
   const envProjectName = 'envdemo';
   const envProjectRoot = path.join(envSandboxRoot, envProjectName);

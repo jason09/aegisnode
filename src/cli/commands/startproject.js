@@ -10,6 +10,8 @@ import {
   renderProjectPackageJson,
   renderProjectRoutes,
   renderProjectSettings,
+  renderTsConfig,
+  withSourceExtension,
 } from '../utils/scaffolds.js';
 
 async function createSecret() {
@@ -37,32 +39,36 @@ async function assertCanCreateProject(projectDir) {
   }
 }
 
-async function createBaseProjectFiles(projectRoot, projectName) {
+async function createBaseProjectFiles(projectRoot, projectName, { typescript = false } = {}) {
   const apps = [];
   const appSecret = await createSecret();
+  const sourceExtension = typescript ? '.ts' : '.js';
 
   await ensureDir(projectRoot);
   await Promise.all([
     ensureDir(path.join(projectRoot, 'apps')),
   ]);
 
-  await writeFile(path.join(projectRoot, 'app.js'), renderProjectAppJs());
-  await writeFile(path.join(projectRoot, 'loader.cjs'), renderProjectLoaderCjs());
-  await writeFile(path.join(projectRoot, 'package.json'), renderProjectPackageJson(projectName));
+  await writeFile(path.join(projectRoot, withSourceExtension('app', sourceExtension)), renderProjectAppJs());
+  await writeFile(path.join(projectRoot, 'loader.cjs'), renderProjectLoaderCjs(sourceExtension));
+  await writeFile(path.join(projectRoot, 'package.json'), renderProjectPackageJson(projectName, { typescript }));
   await writeFile(path.join(projectRoot, '.gitignore'), renderProjectGitIgnore());
   await writeFile(path.join(projectRoot, '.env'), renderProjectEnv(appSecret));
   await writeFile(path.join(projectRoot, '.env.example'), renderEnvExample());
 
-  await writeFile(path.join(projectRoot, 'settings.js'), renderProjectSettings(projectName, apps, appSecret));
-  await writeFile(path.join(projectRoot, 'routes.js'), renderProjectRoutes());
+  await writeFile(path.join(projectRoot, withSourceExtension('settings', sourceExtension)), renderProjectSettings(projectName, apps, appSecret));
+  await writeFile(path.join(projectRoot, withSourceExtension('routes', sourceExtension)), renderProjectRoutes());
+  if (typescript) {
+    await writeFile(path.join(projectRoot, 'tsconfig.json'), renderTsConfig());
+  }
 }
 
-export async function startProject({ projectName, cwd }) {
+export async function startProject({ projectName, cwd, typescript = false }) {
   ensureValidName(projectName, 'project');
 
   const projectRoot = path.resolve(cwd, projectName);
   await assertCanCreateProject(projectRoot);
-  await createBaseProjectFiles(projectRoot, projectName);
+  await createBaseProjectFiles(projectRoot, projectName, { typescript });
 
   console.log(`AegisNode project created at ${projectRoot}`);
   console.log('Next steps:');

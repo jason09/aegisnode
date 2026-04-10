@@ -1,6 +1,6 @@
 {
   "name": "aegisnode",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A view-first Node.js framework for modular web apps and JSON APIs with CLI scaffolding, runtime injection, auth, uploads, i18n, mail, and WebSocket support.",
   "type": "module",
   "main": "./src/index.js",
@@ -55,6 +55,7 @@
     "nodemailer": "^8.0.2",
     "querymesh": "^0.0.7",
     "socket.io": "^4.8.1",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "tsx": "^4.21.0"
   }
 }

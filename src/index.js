@@ -5,6 +5,7 @@ export { createLogger } from './runtime/logger.js';
 export { deepMerge, normalizeApps } from './runtime/config.js';
 export { createAuthManager, normalizeAuthConfig, createAuthGuard } from './runtime/auth.js';
 export { createMailManager, normalizeMailConfig } from './runtime/mail.js';
+export { registerTypeScriptRuntime } from './runtime/typescript.js';
 export {
   money,
   number,

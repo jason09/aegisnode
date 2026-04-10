@@ -2,8 +2,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { loadProjectConfig } from '../../runtime/config.js';
 import { ensureValidName } from '../utils/fs.js';
-import { resolveProjectRoot } from '../utils/project.js';
+import { getProjectSourceExtension, resolveProjectRoot } from '../utils/project.js';
 import { getAppScaffoldEntries, toImportName } from '../utils/apps.js';
+import { withSourceExtension } from '../utils/scaffolds.js';
+import { resolveSourceFile } from '../../utils/source-files.js';
 
 function createCollector() {
   const entries = [];
@@ -34,6 +36,9 @@ function escapeRegExp(value) {
 
 async function runAppChecks(rootDir, config, collector, targetAppName = null) {
   const apps = Array.isArray(config.apps) ? config.apps : [];
+  const sourceExtension = getProjectSourceExtension(rootDir);
+  const routesFile = resolveSourceFile(path.join(rootDir, 'routes'), [sourceExtension]) || resolveSourceFile(path.join(rootDir, 'routes'));
+  const routesLabel = routesFile ? path.basename(routesFile) : withSourceExtension('routes', sourceExtension);
   const declaredApps = new Map();
 
   for (const app of apps) {
@@ -52,7 +57,6 @@ async function runAppChecks(rootDir, config, collector, targetAppName = null) {
     collector.ok(`Declared apps: ${apps.map((app) => app.name).join(', ')}`);
   }
 
-  const routesFile = path.join(rootDir, 'routes.js');
   const routesFileExists = await fileExists(routesFile);
   const routesContent = routesFileExists ? await fs.readFile(routesFile, 'utf8') : '';
   const targetApps = targetAppName ? [targetAppName] : apps;
@@ -79,7 +83,7 @@ async function runAppChecks(rootDir, config, collector, targetAppName = null) {
       continue;
     }
 
-    for (const entry of getAppScaffoldEntries(appName)) {
+    for (const entry of getAppScaffoldEntries(appName, sourceExtension)) {
       const target = path.join(rootDir, entry.target);
       if (!(await fileExists(target))) {
         collector.warn(`App "${appName}" missing ${path.relative(appRoot, target)}.`);
@@ -96,37 +100,39 @@ async function runAppChecks(rootDir, config, collector, targetAppName = null) {
     }
 
     if (!routesFileExists) {
-      collector.warn(`Project routes.js is missing; app "${appName}" cannot be mounted centrally.`);
+      collector.warn(`Project ${routesLabel} is missing; app "${appName}" cannot be mounted centrally.`);
       continue;
     }
 
-    const importPath = `./apps/${appName}/routes.js`;
+    const importPath = `./apps/${appName}/routes${sourceExtension}`;
     const importName = toImportName(appName);
     const routePattern = new RegExp(`route\\.use\\([^\\n]*,\\s*${escapeRegExp(importName)}\\s*\\);`);
 
     if (!routesContent.includes(importPath)) {
-      collector.warn(`Project routes.js is missing import for app "${appName}".`);
+      collector.warn(`Project ${routesLabel} is missing import for app "${appName}".`);
     }
 
     if (!routePattern.test(routesContent)) {
-      collector.warn(`Project routes.js is missing route.use(...) mount for app "${appName}".`);
+      collector.warn(`Project ${routesLabel} is missing route.use(...) mount for app "${appName}".`);
     }
   }
 }
 
 async function runStartupEntryChecks(rootDir, config, collector) {
   const env = String(config.env || process.env.NODE_ENV || 'development').trim().toLowerCase();
-  const appEntryPath = path.join(rootDir, 'app.js');
+  const sourceExtension = getProjectSourceExtension(rootDir);
+  const appEntryPath = resolveSourceFile(path.join(rootDir, 'app'), [sourceExtension])
+    || path.join(rootDir, withSourceExtension('app', sourceExtension));
   const loaderEntryPath = path.join(rootDir, 'loader.cjs');
   const appEntryExists = await fileExists(appEntryPath);
   const loaderEntryExists = await fileExists(loaderEntryPath);
 
   if (appEntryExists) {
-    collector.ok('app.js exists.');
+    collector.ok(`${path.basename(appEntryPath)} exists.`);
   } else if (env === 'production') {
-    collector.error('app.js is missing for production startup. Run "aegisnode generateloader" to restore startup entry files.');
+    collector.error(`${path.basename(appEntryPath)} is missing for production startup. Run "aegisnode generateloader" to restore startup entry files.`);
   } else {
-    collector.warn('app.js is missing. Run "aegisnode generateloader" to restore startup entry files.');
+    collector.warn(`${path.basename(appEntryPath)} is missing. Run "aegisnode generateloader" to restore startup entry files.`);
   }
 
   if (loaderEntryExists) {

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { pathToFileURL } from 'url';
+import { resolveSourceFile, resolveSourceIndexFile } from '../utils/source-files.js';
+import { importProjectModule } from './typescript.js';
 
 const BASE_PROCESS_ENV = new Map(Object.entries(process.env));
 const FRAMEWORK_LOADED_ENV_KEYS = new Set();
@@ -419,12 +420,11 @@ export function defaultConfig(rootDir) {
 }
 
 async function importDefaultIfExists(filePath) {
-  if (!fs.existsSync(filePath)) {
+  if (!filePath || !fs.existsSync(filePath)) {
     return null;
   }
 
-  const moduleUrl = `${pathToFileURL(filePath).href}?t=${Date.now()}`;
-  const loaded = await import(moduleUrl);
+  const loaded = await importProjectModule(filePath);
   return loaded?.default ?? null;
 }
 
@@ -432,12 +432,12 @@ export async function loadProjectConfig(rootDir, logger = null) {
   loadEnvironmentFiles(rootDir, logger);
   const config = defaultConfig(rootDir);
 
-  const settingsFile = path.join(rootDir, 'settings.js');
+  const settingsFile = resolveSourceFile(path.join(rootDir, 'settings'));
   const settingsDir = path.join(rootDir, 'settings');
-  const indexFile = path.join(settingsDir, 'index.js');
-  const dbFile = path.join(settingsDir, 'db.js');
-  const cacheFile = path.join(settingsDir, 'cache.js');
-  const appsFile = path.join(settingsDir, 'apps.js');
+  const indexFile = resolveSourceIndexFile(settingsDir);
+  const dbFile = resolveSourceFile(path.join(settingsDir, 'db'));
+  const cacheFile = resolveSourceFile(path.join(settingsDir, 'cache'));
+  const appsFile = resolveSourceFile(path.join(settingsDir, 'apps'));
 
   const [settingsConfig, indexConfig, dbConfig, cacheConfig, appsConfig] = await Promise.all([
     importDefaultIfExists(settingsFile),
