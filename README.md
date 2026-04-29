@@ -2,77 +2,24 @@
 
 ![AegisNode Banner](assets/aegisnode-banner.svg)
 
-AegisNode is a modular, view-first Node.js framework for building web apps, JSON APIs, and hybrid projects without spending the first part of the project wiring the same infrastructure again and again.
-It gives you a structured project layout, runtime injection, CLI scaffolding, and production-ready defaults while still keeping the Node.js and Express ecosystem familiar.
+AegisNode is a modular, view-first Node.js framework for building web apps, JSON APIs, and hybrid projects.
+It gives you a structured project layout, runtime injection, CLI scaffolding, and production-ready defaults so you can start building features instead of first wiring routing, config loading, auth, uploads, and other framework glue.
 
 AegisNode is designed for developers who want more structure than raw Express, but do not want a framework that hides the Node.js runtime behind too many abstractions.
-It keeps the request/response model familiar while organizing the codebase around clear app boundaries, runtime-injected dependencies, and reusable layers such as views, services, models, validators, and subscribers.
+It keeps the request/response model familiar while organizing the codebase around clear app boundaries and reusable layers such as views, services, models, validators, subscribers, and app-local utilities.
 
 It works well for projects that mix server-rendered pages and JSON endpoints, for teams that want a consistent project shape from the start, and for codebases that need built-in support for common backend concerns like auth, uploads, i18n, mail, maintenance mode, and environment-driven configuration.
-The goal is to reduce setup time, remove repetitive infrastructure work, and give the project a cleaner long-term structure without making day-to-day development feel heavy.
 
-## Documentation Guide
+Read this README in this order:
+1. Quick Start: get a project created, installed, and running.
+2. Core Concepts And App Structure: understand where code lives and how layers fit together.
+3. Common Tasks And Feature Guides: jump to the feature you need once the basics are clear.
+4. Full Settings Reference: use this when you already know which config block you are looking for.
+5. Runtime Patterns And Advanced Topics: read this last for middleware, validators, subscribers, and strict-layer behavior.
 
-If you are new to AegisNode, read this README in this order:
-- Quick Start: create a project, install dependencies, run the server, and understand startup mode rules.
-- Core Concepts And App Structure: understand apps, layers, injected runtime context, and project flow.
-- Common Tasks And Feature Guides: uploads, API apps, auth, templates, i18n, mail, and related features.
-- Full Settings Reference: use this as the complete config manual once you already know what feature you need.
-- Runtime Patterns And Advanced Topics: validators, strict layers, subscribers, and security details.
+If you prefer a sidebar-based handbook, open `docs/index.html` in a browser.
 
-Standalone HTML handbook:
-- Open `docs/index.html` in a browser for a sidebar-based documentation view.
-
-## How AegisNode Helps
-
-AegisNode helps by standardizing the parts that usually consume time early in a project:
-- project scaffolding and app generation,
-- route and layer organization,
-- dependency injection and shared runtime context,
-- config loading and environment overrides,
-- auth, upload, mail, websocket, and i18n integration,
-- operational helpers such as health checks, maintenance mode, and project diagnostics.
-
-This means you spend less time writing framework glue and more time writing business features.
-
-## Why Use AegisNode
-
-Choose AegisNode if you want a project starter that remains readable as it grows.
-It keeps the development model simple, but adds enough structure and tooling to make larger codebases easier to navigate, extend, and maintain.
-
-Core features:
-
-- CLI generators (`startproject`, `createapp`, `runserver`)
-- App scaffold repair command (`fix`)
-- Startup entry generator (`generateloader`)
-- Project health checker (`doctor`)
-- Dependency updater (`updatedeps`)
-- Maintenance mode with custom HTML responses
-- Generators for app artifacts (`generate view|model|validator|dto|service|subscriber|route`)
-- DI container
-- Event system with subscribers
-- Modular app structure
-- SQL/NoSQL bootstrap via QueryMesh/Mongoose
-- WebSocket bootstrap using Socket.IO
-- Built-in file uploads with size/type limits (`route.upload`)
-- Built-in mail transport wrapper (`mail.send`, `req.aegis.mail.send`)
-- Centralized config and loaders
-- Security headers via Helmet (configurable CSP) + CSRF protection for form submissions
-- Built-in rate limiting for basic DDoS resistance
-- Root route file `routes.js` (not `routes/` folder)
-- Automatic default confirmation page on `/` when no custom `/` route exists
-- App folder uses `views.js` (not `controllers/` folder)
-- `createapp` uses file modules: `views.js`, `models.js`, `validators.js`, `routes.js`, `subscribers.js`, `services.js`, `utils.js`
-- `createapp` also generates app tests in `apps/<app>/tests`
-- EJS templates configurable in `settings.js` with Django-style base layout flow
-- Built-in runtime helpers (`money`, `number`, `dateTime`, `timeElapsed`, `toObjectId`) + `jlive` bridge
-
-`startproject` creates `app.js`, `loader.cjs`, `.env`, `settings.js`, and `routes.js` without creating any default app.
-Use `startproject --typescript` to generate `app.ts`, `settings.ts`, `routes.ts`, app `*.ts` files, and `tsconfig.json` instead.
-It does not create `public/` or `logs/`; create your own folders and set them in `settings.js` or `settings.ts`.
-
-Environment files are loaded automatically before `settings.js` or `settings.ts` is imported.
-Supported files:
+Environment files are loaded automatically before `settings.js` or `settings.ts` is imported:
 - `.env`
 - `.env.local`
 - `.env.<NODE_ENV>`
@@ -82,29 +29,74 @@ Shell or hosting-panel environment variables win over values from `.env` files.
 
 ## Quick Start
 
-### CLI
+Use this section to get a project running first. Skip to later sections only when you need a specific feature or configuration block.
+
+### Create A Project
 
 ```bash
 npm install -g aegisnode
 
 aegisnode startproject blog
 aegisnode startproject blog-ts --typescript
+```
+
+Use plain `startproject` for a JavaScript project. Add `--typescript` once if you want the whole scaffold to use `.ts`.
+
+`startproject` creates `app.js`, `loader.cjs`, `.env`, `settings.js`, and `routes.js` without creating any default app.
+Use `startproject --typescript` to generate `app.ts`, `settings.ts`, `routes.ts`, app `*.ts` files, and `tsconfig.json` instead.
+It does not create `public/` or `logs/`; create your own folders and point `settings.js` or `settings.ts` at them when needed.
+
+### Install Dependencies And Run The Server
+
+```bash
 npm --prefix blog install
 aegisnode runserver --project blog
-
-aegisnode createapp users --project blog
-aegisnode fix --app users --project blog
-aegisnode generate view profile --app users --project blog
-aegisnode generate route profile --app users --project blog
-aegisnode generateloader --project blog
-aegisnode doctor --project blog
-aegisnode doctor --app users --project blog
-aegisnode updatedeps --project blog
 ```
 
 `cd blog` is optional. You can run commands from parent folder with `--project blog`.
 
-Use `--typescript` on `startproject` when you want a TypeScript scaffold. That generates `app.ts`, `settings.ts`, `routes.ts`, `tsconfig.json`, app files like `views.ts`/`services.ts`, and generated artifacts such as `profile.view.ts`.
+### Create Your First App
+
+```bash
+aegisnode createapp users --project blog
+aegisnode generate view profile --app users --project blog
+aegisnode generate route profile --app users --project blog
+```
+
+`createapp` updates `settings.apps` and the root `routes.js` or `routes.ts` mapping for you.
+It also generates default app tests under `apps/<app>/tests`.
+
+### Startup Mode Rules
+
+- Development (`env === 'development'`): start with `aegisnode runserver`.
+- Non-development (`env !== 'development'`): start with `node loader.cjs`.
+- `node app.js` and `node loader.cjs` are blocked in development mode.
+- `aegisnode runserver` is blocked outside development mode.
+
+### Project Maintenance Commands
+
+Use these after the project already exists:
+
+```bash
+aegisnode doctor --project blog
+aegisnode doctor --app users --project blog
+aegisnode fix --app users --project blog
+aegisnode generateloader --project blog
+aegisnode updatedeps --project blog
+```
+
+What they do:
+- `doctor`: checks project structure, startup entry files, app declarations, and security/auth basics.
+- `doctor --app`: checks one app for missing scaffold files, tests, and registrations.
+- `fix --app`: recreates missing app scaffold files without overwriting existing files.
+- `generateloader`: restores `loader.cjs` and `app.js` when startup files are missing.
+- `updatedeps`: rewrites package dependency ranges to the current npm `latest` versions and reinstalls.
+
+Run project tests with:
+
+```bash
+npm test
+```
 
 ### JavaScript vs TypeScript Projects
 
@@ -119,166 +111,47 @@ After that, the rest of the CLI follows the project automatically:
 
 `createapp`, `fix`, `generate`, `runserver`, `generateloader`, `doctor`, and `updatedeps` are project-level commands.
 Run them from the project root; do not `cd` into `apps/<app>`.
-Startup mode rules:
-- Development (`env === development`): start with `aegisnode runserver` only.
-- Non-development (`env !== development`): start with `node loader.cjs` (or your process manager/host pointing to `loader.cjs`).
-- `node app.js` and `node loader.cjs` are rejected in development mode.
-- `aegisnode runserver` is rejected outside development mode.
 
-### Trust Proxy
+## Core Concepts And App Structure
 
-If your app runs behind Nginx, Apache, Passenger, or another reverse proxy that terminates HTTPS before the Node process, set top-level `trustProxy` in `settings.js`:
+Use this section to understand the project shape before you start adding more features. The goal here is to make it clear where code belongs and what each layer is responsible for.
 
-```js
-export default {
-  trustProxy: 1,
-};
-```
+### Generated Project Shape
 
-This is the AegisNode equivalent of `app.set('trust proxy', 1)` in raw Express. It makes `req.secure`, `req.protocol`, client IP detection, secure cookies, and HTTPS-aware auth logic behave correctly behind the proxy.
+`startproject` creates the runtime entry files and base config for you:
+- JavaScript projects: `app.js`, `loader.cjs`, `.env`, `settings.js`, `routes.js`
+- TypeScript projects: `app.ts`, `loader.cjs`, `.env`, `settings.ts`, `routes.ts`, `tsconfig.json`
 
-Prefer an exact value such as `1`, `'loopback'`, or a subnet string instead of `true`.
+`createapp` then adds feature modules under `apps/<app>/`:
+- `views.js` or `views.ts`
+- `models.js` or `models.ts`
+- `services.js` or `services.ts`
+- `validators.js` or `validators.ts`
+- `routes.js` or `routes.ts`
+- `subscribers.js` or `subscribers.ts`
+- `utils.js` or `utils.ts`
+- `tests/`
 
-### Deploy On Phusion Passenger
+Other scaffold rules to know:
+- `createapp` auto-detects the project root when you run it inside the project or from a parent folder containing exactly one AegisNode project.
+- New apps are registered in `settings.apps` and mounted in the root `routes.js` or `routes.ts`.
+- Only apps declared in `settings.apps` are allowed to load or mount.
+- `--mount` accepts only safe path segments (`a-z`, `A-Z`, `0-9`, `_`, `-`, `:`).
+- New app routes are generated in an API-ready CRUD shape by default:
+  - `GET /<mount>`
+  - `POST /<mount>`
+  - `GET /<mount>/:id`
+  - `PUT /<mount>/:id`
+  - `DELETE /<mount>/:id`
+- Default app tests generated by `createapp` are:
+  - JavaScript projects: `apps/<app>/tests/models.test.js`, `validators.test.js`, `services.test.js`, `routes.test.js`
+  - TypeScript projects: `apps/<app>/tests/models.test.ts`, `validators.test.ts`, `services.test.ts`, `routes.test.ts`
 
-AegisNode supports Passenger-style startup using the generated `loader.cjs`.
+### Generated Settings Shape
 
-Passenger setup (Apache/Nginx/Plesk/cPanel/etc.):
-1. Set **Application Root** to your project folder.
-2. Set **Startup File** to `loader.cjs`.
-3. Install dependencies in project root (for example: `npm install --omit=dev`).
-4. Set environment variables (at minimum `NODE_ENV=production`; keep `PORT` managed by Passenger).
-5. Restart the Node app from your hosting panel/service.
+`startproject` generates a minimal `settings.js` or `settings.ts`, and runtime defaults fill the rest.
 
-Plesk note: these map to **Application Root** and **Application Startup File** fields.
-
-HTTPS note:
-- If TLS is terminated by Passenger/Apache/Nginx, keep `https.enabled` off and set top-level `trustProxy` to `1` (or another exact proxy-hop/subnet value) so `req.secure`, secure cookies, and OAuth2 HTTPS checks work correctly.
-- Only enable `https` in `settings.js` when Node itself should serve TLS directly.
-
-How it works:
-- `loader.cjs` imports `app.js` in JavaScript projects or `app.ts` in TypeScript projects.
-- `app.js` / `app.ts` starts AegisNode with project root resolved from its own file location, so it works correctly under Passenger.
-
-
-Generated routes are auto-wired into `apps/<app>/routes.js`.
-`createapp` auto-detects the project root when run inside the project or from a parent folder containing exactly one AegisNode project.
-After `createapp user`, `routes.js` is updated with central mapping style:
-`route.use('/user', user);`
-Only apps declared in `settings.apps` are allowed to load/mount. Startup fails when routes reference an undeclared app.
-`--mount` accepts only safe path segments (`a-z`, `A-Z`, `0-9`, `_`, `-`, `:`).
-
-By default, new app routes are API-ready:
-- `GET /<mount>` list
-- `POST /<mount>` create
-- `GET /<mount>/:id` read
-- `PUT /<mount>/:id` update
-- `DELETE /<mount>/:id` delete
-
-Default flow is `route -> validator -> service -> model`.
-Default app tests generated by `createapp`:
-- JavaScript projects: `apps/<app>/tests/models.test.js`, `validators.test.js`, `services.test.js`, `routes.test.js`
-- TypeScript projects: `apps/<app>/tests/models.test.ts`, `validators.test.ts`, `services.test.ts`, `routes.test.ts`
-
-Run all project tests:
-
-```bash
-npm test
-```
-
-Run project preflight checks:
-
-```bash
-aegisnode doctor
-```
-
-`doctor` checks:
-- Project structure (`settings.js`, `routes.js`, app folders)
-- Startup entry files (`app.js`, `loader.cjs`), with production errors when `loader.cjs` is missing
-- App declarations vs filesystem
-- Security baseline (`appSecret`, csrf/headers/ddos toggles)
-- Auth safety checks (JWT secret, OAuth2 `allowHttp` in production)
-- Template directory availability
-
-Run app-level scaffold checks for one app:
-
-```bash
-aegisnode doctor --app users
-```
-
-App-level doctor focuses on the named app:
-- Missing `views.js`, `models.js`, `services.js`, `validators.js`, `routes.js`, `subscribers.js`, `utils.js`
-- Missing generated test files under `apps/<app>/tests`
-- Missing `settings.apps` declaration for that app
-- Missing central `routes.js` import/mount when `autoMountApps` is off
-
-Repair a partially missing app scaffold:
-
-```bash
-aegisnode fix --app users
-```
-
-`fix` recreates missing default app files and tests without overwriting existing files. If the app is missing from `settings.apps` or central `routes.js`, it restores those registrations too.
-
-Regenerate project startup entry files if needed:
-
-```bash
-aegisnode generateloader
-```
-
-This restores `loader.cjs` and also recreates `app.js` if it is missing.
-
-Update project dependencies to the current npm `latest` dist-tag:
-
-```bash
-aegisnode updatedeps
-```
-
-`updatedeps` rewrites `dependencies`, `devDependencies`, `optionalDependencies`, and
-`peerDependencies` in the project `package.json`, then runs the detected package manager's
-`install`. It skips non-registry specs such as `file:`, `workspace:`, and git/http sources.
-
-### Maintenance Mode
-
-Enable maintenance mode in `settings.js` to serve a maintenance route with `503 Service Unavailable`.
-If that route is missing or does not respond, AegisNode renders its internal maintenance fallback view:
-
-```js
-export default {
-  maintenance: {
-    enabled: true,
-    route: '/maintenance',
-    excludePaths: ['/health'],
-    retryAfter: 120,
-  },
-};
-```
-
-```js
-export default {
-  register(route) {
-    route.get('/maintenance', (req, res) => {
-      res.render('maintenance', {
-        title: 'Scheduled maintenance',
-      });
-    });
-  },
-};
-```
-
-Notes:
-- `maintenance.route` is internally rewritten, so requests like `/users` can display your maintenance page without a redirect.
-- If `maintenance.route` is not defined, or the route does not answer, the bundled fallback view is rendered.
-- `excludePaths` lets selected endpoints keep running during maintenance.
-- `retryAfter` sets the HTTP `Retry-After` header.
-- `maintenance: true` uses the built-in default maintenance page.
-- `maintenance: '<html>...</html>'` is still accepted as a shorthand for direct custom HTML.
-
-### Generated Settings Config
-
-`startproject` generates a minimal `settings.js` and runtime defaults fill the rest.
-
-Access environment values anywhere with `process.env`:
+Access environment values directly with `process.env` in the settings file:
 
 ```js
 export default {
@@ -289,9 +162,9 @@ export default {
 };
 ```
 
-Injected app layers also receive `env`, so views/services/models/validators/controllers/subscribers/loaders can use `env.MY_NAME` without importing `process.env`.
+Injected app layers also receive `env`, so views, services, models, validators, controllers, subscribers, and loaders can use `env.MY_NAME` without importing `process.env`.
 
-`settings.js` (generated shape, or `settings.ts` in TypeScript mode):
+Generated shape:
 
 ```js
 export default {
@@ -326,11 +199,9 @@ export default {
 
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
-- `startproject` writes a local `.env` with a generated `APP_SECRET` and also embeds the same generated secret in `settings.js` as a fallback.
-- Add optional blocks manually only when needed: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `mail`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- `startproject` writes a local `.env` with a generated `APP_SECRET` and also embeds the same generated secret in `settings.js` or `settings.ts` as a fallback.
+- Add optional blocks only when you need them: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `mail`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
-
-## Core Concepts And App Structure
 
 ### App File Usage Examples
 
@@ -554,6 +425,77 @@ export default {
 ```
 
 ## Common Tasks And Feature Guides
+
+Use this section once the project is already running and you need a specific feature, integration, or deployment-related behavior.
+
+### Reverse Proxies And Passenger
+
+If HTTPS is terminated by Nginx, Apache, Passenger, or another reverse proxy before the Node process, set top-level `trustProxy` in `settings.js` or `settings.ts`:
+
+```js
+export default {
+  trustProxy: 1,
+};
+```
+
+This is the AegisNode equivalent of `app.set('trust proxy', 1)` in raw Express. It makes `req.secure`, `req.protocol`, client IP detection, secure cookies, and HTTPS-aware auth logic behave correctly behind the proxy.
+
+Prefer an exact value such as `1`, `'loopback'`, or a subnet string instead of `true`.
+
+AegisNode also supports Passenger-style startup using the generated `loader.cjs`.
+
+Passenger setup (Apache, Nginx, Plesk, cPanel, and similar hosts):
+1. Set **Application Root** to your project folder.
+2. Set **Startup File** to `loader.cjs`.
+3. Install dependencies in the project root, for example `npm install --omit=dev`.
+4. Set environment variables. At minimum, make sure the resolved app env is production and let Passenger manage `PORT`.
+5. Restart the Node app from the hosting panel or service manager.
+
+Plesk note: these map to **Application Root** and **Application Startup File** fields.
+
+HTTPS note:
+- If TLS is terminated by Passenger, Apache, or Nginx, keep `https.enabled` off and use `trustProxy`.
+- Only enable `https` in `settings.js` or `settings.ts` when Node itself should serve TLS directly.
+
+How it works:
+- `loader.cjs` imports `app.js` in JavaScript projects or `app.ts` in TypeScript projects.
+- `app.js` or `app.ts` starts AegisNode with project root resolved from its own file location, so the same entry works under process managers and hosting panels.
+
+### Maintenance Mode
+
+Enable maintenance mode in `settings.js` or `settings.ts` to serve a maintenance route with `503 Service Unavailable`.
+If that route is missing or does not respond, AegisNode renders its internal maintenance fallback view.
+
+```js
+export default {
+  maintenance: {
+    enabled: true,
+    route: '/maintenance',
+    excludePaths: ['/health'],
+    retryAfter: 120,
+  },
+};
+```
+
+```js
+export default {
+  register(route) {
+    route.get('/maintenance', (req, res) => {
+      res.render('maintenance', {
+        title: 'Scheduled maintenance',
+      });
+    });
+  },
+};
+```
+
+Notes:
+- `maintenance.route` is internally rewritten, so requests like `/users` can display your maintenance page without a redirect.
+- If `maintenance.route` is not defined, or the route does not answer, the bundled fallback view is rendered.
+- `excludePaths` lets selected endpoints keep running during maintenance.
+- `retryAfter` sets the HTTP `Retry-After` header.
+- `maintenance: true` uses the built-in default maintenance page.
+- `maintenance: '<html>...</html>'` is still accepted as a shorthand for direct custom HTML.
 
 ### File Uploads
 
@@ -1676,6 +1618,8 @@ Then in EJS:
 <!-- SETTINGS_REFERENCE_START -->
 ## Full Settings Reference
 
+Use this section as a config manual. It is intentionally reference-heavy and is easier to use after you already know which feature or runtime block you need to configure.
+
 All fields below are supported in `settings.js`. If you omit a field, AegisNode uses the runtime default.
 
 Merge order used at startup:
@@ -2190,6 +2134,8 @@ Behavior:
 <!-- SETTINGS_REFERENCE_END -->
 
 ## Runtime Patterns And Advanced Topics
+
+Use this section after the basics are clear. It covers the runtime contracts that matter once you are shaping larger apps or enforcing stricter boundaries.
 
 ### Middleware
 
