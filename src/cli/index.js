@@ -21,18 +21,18 @@ Usage:
   aegisnode updatedeps [--project <path>]
 
 Examples:
+  mkdir blog && cd blog
   aegisnode startproject blog
   aegisnode startproject blog --typescript
-  cd blog
   npm install
   aegisnode runserver
   aegisnode createapp users
   aegisnode fix --app users
   aegisnode generate view user --app users
   aegisnode generate validator user --app users
-  aegisnode generateloader --project blog
-  aegisnode doctor --app users --project blog
-  aegisnode updatedeps --project blog
+  aegisnode generateloader
+  aegisnode doctor --app users
+  aegisnode updatedeps
 `);
 }
 

@@ -44,18 +44,18 @@
   },
   "license": "MIT",
   "dependencies": {
-    "ejs": "^3.1.10",
-    "express": "^4.21.2",
-    "express-rate-limit": "^8.3.1",
+    "ejs": "^5.0.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
     "helmet": "^8.1.0",
     "jlive": "^0.1.2",
-    "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.12.1",
-    "multer": "^2.1.0",
-    "nodemailer": "^8.0.2",
-    "querymesh": "^0.0.7",
-    "socket.io": "^4.8.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.6.2",
+    "multer": "^2.1.1",
+    "nodemailer": "^8.0.7",
+    "querymesh": "^0.1.0",
+    "socket.io": "^4.8.3",
     "swagger-ui-express": "^5.0.1",
-    "tsx": "^4.21.0"
+    "tsx": "^4.22.0"
   }
 }

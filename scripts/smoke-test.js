@@ -138,13 +138,27 @@ async function main() {
   const proxySandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-proxy-'));
   const typescriptSandboxRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'aegisnode-ts-'));
 
-  await startProject({ projectName, cwd: sandboxRoot });
+  await fs.mkdir(projectRoot, { recursive: true });
+  await startProject({ projectName, cwd: projectRoot });
   const generatedProjectEnv = await fs.readFile(path.join(projectRoot, '.env'), 'utf8');
   assert.match(generatedProjectEnv, /^APP_SECRET=.{16,}$/m);
   const generatedAppSecret = generatedProjectEnv.match(/^APP_SECRET=(.+)$/m)?.[1]?.trim();
   assert.ok(generatedAppSecret);
   const generatedSettings = await fs.readFile(path.join(projectRoot, 'settings.js'), 'utf8');
+  assert.ok(generatedSettings.includes("staticDir: 'public'"));
+  assert.ok(generatedSettings.includes("templates: {\n    enabled: true,\n    engine: 'ejs',\n    dir: 'templates',\n    base: 'base',\n  }"));
   assert.ok(generatedSettings.includes(`appSecret: process.env.APP_SECRET || ${JSON.stringify(generatedAppSecret)}`));
+  const generatedConfig = await loadProjectConfig(projectRoot);
+  assert.equal(generatedConfig.security.ddos.maxRequests, 300);
+  await fs.access(path.join(projectRoot, 'public'));
+  await fs.access(path.join(projectRoot, 'templates'));
+  const nonEmptyProjectRoot = path.join(sandboxRoot, 'non-empty-project');
+  await fs.mkdir(nonEmptyProjectRoot, { recursive: true });
+  await fs.writeFile(path.join(nonEmptyProjectRoot, 'keep.txt'), 'occupied', 'utf8');
+  await assert.rejects(
+    () => startProject({ projectName: 'busy', cwd: nonEmptyProjectRoot }),
+    /Current directory is not empty/,
+  );
   await assert.rejects(
     () => runProject({
       rootDir: projectRoot,
@@ -158,11 +172,14 @@ async function main() {
 
   const tsProjectName = 'forumts';
   const tsProjectRoot = path.join(typescriptSandboxRoot, tsProjectName);
-  await startProject({ projectName: tsProjectName, cwd: typescriptSandboxRoot, typescript: true });
+  await fs.mkdir(tsProjectRoot, { recursive: true });
+  await startProject({ projectName: tsProjectName, cwd: tsProjectRoot, typescript: true });
   await fs.access(path.join(tsProjectRoot, 'app.ts'));
   await fs.access(path.join(tsProjectRoot, 'settings.ts'));
   await fs.access(path.join(tsProjectRoot, 'routes.ts'));
   await fs.access(path.join(tsProjectRoot, 'tsconfig.json'));
+  await fs.access(path.join(tsProjectRoot, 'public'));
+  await fs.access(path.join(tsProjectRoot, 'templates'));
   const tsPackageJson = JSON.parse(await fs.readFile(path.join(tsProjectRoot, 'package.json'), 'utf8'));
   assert.equal(tsPackageJson.scripts.test, 'node --import tsx/esm --test');
   assert.equal(tsPackageJson.scripts.typecheck, 'tsc --noEmit');
@@ -218,7 +235,8 @@ async function main() {
 
   const envProjectName = 'envdemo';
   const envProjectRoot = path.join(envSandboxRoot, envProjectName);
-  await startProject({ projectName: envProjectName, cwd: envSandboxRoot });
+  await fs.mkdir(envProjectRoot, { recursive: true });
+  await startProject({ projectName: envProjectName, cwd: envProjectRoot });
   await fs.writeFile(
     path.join(envProjectRoot, 'settings.js'),
     `export default {
@@ -271,7 +289,8 @@ async function main() {
 
   const dotenvProjectName = 'dotenvdemo';
   const dotenvProjectRoot = path.join(dotenvSandboxRoot, dotenvProjectName);
-  await startProject({ projectName: dotenvProjectName, cwd: dotenvSandboxRoot });
+  await fs.mkdir(dotenvProjectRoot, { recursive: true });
+  await startProject({ projectName: dotenvProjectName, cwd: dotenvProjectRoot });
   await fs.writeFile(
     path.join(dotenvProjectRoot, '.env'),
     `AEGIS_TEST_HOST=127.0.0.1
@@ -306,7 +325,8 @@ AEGIS_TEST_APP_SECRET=test-dotenv-secret
 
   const httpsProjectName = 'httpsdemo';
   const httpsProjectRoot = path.join(httpsSandboxRoot, httpsProjectName);
-  await startProject({ projectName: httpsProjectName, cwd: httpsSandboxRoot });
+  await fs.mkdir(httpsProjectRoot, { recursive: true });
+  await startProject({ projectName: httpsProjectName, cwd: httpsProjectRoot });
   await fs.mkdir(path.join(httpsProjectRoot, 'certs'), { recursive: true });
   await fs.writeFile(
     path.join(httpsProjectRoot, 'certs', 'localhost-key.pem'),
@@ -389,7 +409,8 @@ dkcqnJD4SGWVeG+KhA==
 
   const proxyProjectName = 'proxydemo';
   const proxyProjectRoot = path.join(proxySandboxRoot, proxyProjectName);
-  await startProject({ projectName: proxyProjectName, cwd: proxySandboxRoot });
+  await fs.mkdir(proxyProjectRoot, { recursive: true });
+  await startProject({ projectName: proxyProjectName, cwd: proxyProjectRoot });
   await fs.writeFile(
     path.join(proxyProjectRoot, 'routes.js'),
     `export default {\n  register(route) {\n    route.get('/secure-check', (req, res) => {\n      res.json({ secure: req.secure, protocol: req.protocol });\n    });\n  },\n};\n`,

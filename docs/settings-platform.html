@@ -128,7 +128,7 @@ route.get('/maintenance', (req, res) =&gt; {
   },
   ddos: {
     windowMs: 60000,
-    maxRequests: 120,
+    maxRequests: 300,
     skipPaths: ['/health'],
   },
   csrf: {

@@ -36,31 +36,34 @@ Use this section to get a project running first. Skip to later sections only whe
 ```bash
 npm install -g aegisnode
 
+mkdir blog && cd blog
 aegisnode startproject blog
-aegisnode startproject blog-ts --typescript
 ```
 
+Create and enter the project directory first. `startproject` scaffolds into the current empty directory; it does not create a nested folder for you.
 Use plain `startproject` for a JavaScript project. Add `--typescript` once if you want the whole scaffold to use `.ts`.
+For a TypeScript project, use `aegisnode startproject blog --typescript` inside the target folder instead.
 
-`startproject` creates `app.js`, `loader.cjs`, `.env`, `settings.js`, and `routes.js` without creating any default app.
+`startproject` creates `app.js`, `loader.cjs`, `.env`, `settings.js`, and `routes.js` in the current directory without creating any default app.
 Use `startproject --typescript` to generate `app.ts`, `settings.ts`, `routes.ts`, app `*.ts` files, and `tsconfig.json` instead.
-It does not create `public/` or `logs/`; create your own folders and point `settings.js` or `settings.ts` at them when needed.
+It also creates `public/` and `templates/` so the default `staticDir` and `templates.dir` targets already exist.
+Create any additional folders such as `logs/` yourself when needed.
 
 ### Install Dependencies And Run The Server
 
 ```bash
-npm --prefix blog install
-aegisnode runserver --project blog
+npm install
+aegisnode runserver
 ```
 
-`cd blog` is optional. You can run commands from parent folder with `--project blog`.
+If you choose to stay outside the project folder, the project-level commands also accept `--project <path>`.
 
 ### Create Your First App
 
 ```bash
-aegisnode createapp users --project blog
-aegisnode generate view profile --app users --project blog
-aegisnode generate route profile --app users --project blog
+aegisnode createapp users
+aegisnode generate view profile --app users
+aegisnode generate route profile --app users
 ```
 
 `createapp` updates `settings.apps` and the root `routes.js` or `routes.ts` mapping for you.
@@ -78,11 +81,11 @@ It also generates default app tests under `apps/<app>/tests`.
 Use these after the project already exists:
 
 ```bash
-aegisnode doctor --project blog
-aegisnode doctor --app users --project blog
-aegisnode fix --app users --project blog
-aegisnode generateloader --project blog
-aegisnode updatedeps --project blog
+aegisnode doctor
+aegisnode doctor --app users
+aegisnode fix --app users
+aegisnode generateloader
+aegisnode updatedeps
 ```
 
 What they do:
@@ -101,8 +104,8 @@ npm test
 ### JavaScript vs TypeScript Projects
 
 The project type is chosen once at `startproject` time:
-- `aegisnode startproject blog` creates a JavaScript project
-- `aegisnode startproject blog --typescript` creates a TypeScript project
+- `aegisnode startproject blog` scaffolds a JavaScript project in the current directory
+- `aegisnode startproject blog --typescript` scaffolds a TypeScript project in the current directory
 
 After that, the rest of the CLI follows the project automatically:
 - `createapp` generates `views.js` / `services.js` / `routes.js` in JavaScript projects, or `views.ts` / `services.ts` / `routes.ts` in TypeScript projects
@@ -118,7 +121,7 @@ Use this section to understand the project shape before you start adding more fe
 
 ### Generated Project Shape
 
-`startproject` creates the runtime entry files and base config for you:
+`startproject` creates the runtime entry files and base config for you in the current directory:
 - JavaScript projects: `app.js`, `loader.cjs`, `.env`, `settings.js`, `routes.js`
 - TypeScript projects: `app.ts`, `loader.cjs`, `.env`, `settings.ts`, `routes.ts`, `tsconfig.json`
 
@@ -173,6 +176,13 @@ export default {
   host: process.env.HOST || '0.0.0.0',
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
   trustProxy: false,
+  staticDir: 'public',
+  templates: {
+    enabled: true,
+    engine: 'ejs',
+    dir: 'templates',
+    base: 'base',
+  },
   security: {
     appSecret: process.env.APP_SECRET || '<generated-at-scaffold-time>',
   },
@@ -200,7 +210,8 @@ export default {
 Notes:
 - Keep `AEGIS_APPS_START/END` markers; `createapp` updates this list automatically.
 - `startproject` writes a local `.env` with a generated `APP_SECRET` and also embeds the same generated secret in `settings.js` or `settings.ts` as a fallback.
-- Add optional blocks only when you need them: `https`, `templates`, `i18n`, `helpers`, `staticDir`, `websocket`, `uploads`, `mail`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
+- The scaffold already includes `staticDir: 'public'` and a default `templates` block, and it creates those directories for you.
+- Add optional blocks only when you need them: `https`, `i18n`, `helpers`, `websocket`, `uploads`, `mail`, `auth`, `api`, `swagger`, `loaders`, `environments`, `architecture`, `security.headers/ddos/csrf`.
 - Any section you omit uses framework defaults from `src/runtime/config.js`.
 
 ### App File Usage Examples
@@ -837,7 +848,7 @@ export default {
   },
   security: {
     ddos: {
-      maxRequests: 120,
+      maxRequests: 300,
     },
   },
   environments: {
@@ -1847,7 +1858,7 @@ security: {
 | --- | --- | --- |
 | `enabled` | `boolean` / `true` | Enable rate limiter. |
 | `windowMs` | `number` / `60000` | Rate limit window in milliseconds. |
-| `maxRequests` | `number` / `120` | Max requests per window per key. |
+| `maxRequests` | `number` / `300` | Max requests per window per key. |
 | `message` | `string` / `'Too many requests, please try again later.'` | JSON error message text. |
 | `statusCode` | `number` / `429` | Response status code when limited. |
 | `standardHeaders` | `boolean` / `true` | Emit modern rate-limit headers. |
@@ -2502,7 +2513,7 @@ security: {
   ddos: {
     enabled: true,
     windowMs: 60000,
-    maxRequests: 120,
+    maxRequests: 300,
     message: 'Too many requests, please try again later.',
     statusCode: 429,
     standardHeaders: true,

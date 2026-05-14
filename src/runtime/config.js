@@ -287,7 +287,7 @@ export function defaultConfig(rootDir) {
       ddos: {
         enabled: true,
         windowMs: 60000,
-        maxRequests: 120,
+        maxRequests: 300,
         message: 'Too many requests, please try again later.',
         statusCode: 429,
         standardHeaders: true,

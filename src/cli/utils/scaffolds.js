@@ -109,6 +109,13 @@ export function renderProjectSettings(projectName, apps, appSecret = '') {
   host: process.env.HOST || '0.0.0.0',
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
   trustProxy: false,
+  staticDir: 'public',
+  templates: {
+    enabled: true,
+    engine: 'ejs',
+    dir: 'templates',
+    base: 'base',
+  },
   security: {
     // Loaded from .env by default. Scaffold also embeds the generated secret as a fallback.
     // Replace or rotate APP_SECRET in production.
@@ -130,7 +137,7 @@ export function renderProjectSettings(projectName, apps, appSecret = '') {
   },
 
   // Optional sections you can add manually when needed:
-  // maintenance, https, templates, i18n, helpers, staticDir, websocket, uploads, auth, api, mail, swagger,
+  // maintenance, https, i18n, helpers, websocket, uploads, auth, api, mail, swagger,
   // architecture, loaders, environments, security.headers/ddos/csrf
 
   apps: [

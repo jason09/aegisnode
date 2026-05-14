@@ -35,7 +35,7 @@ async function assertCanCreateProject(projectDir) {
 
   const empty = await isDirectoryEmpty(projectDir);
   if (!empty) {
-    throw new Error(`Directory already exists and is not empty: ${projectDir}`);
+    throw new Error(`Current directory is not empty: ${projectDir}. Create and enter an empty project directory before running "aegisnode startproject".`);
   }
 }
 
@@ -47,6 +47,8 @@ async function createBaseProjectFiles(projectRoot, projectName, { typescript = f
   await ensureDir(projectRoot);
   await Promise.all([
     ensureDir(path.join(projectRoot, 'apps')),
+    ensureDir(path.join(projectRoot, 'public')),
+    ensureDir(path.join(projectRoot, 'templates')),
   ]);
 
   await writeFile(path.join(projectRoot, withSourceExtension('app', sourceExtension)), renderProjectAppJs());
@@ -66,13 +68,12 @@ async function createBaseProjectFiles(projectRoot, projectName, { typescript = f
 export async function startProject({ projectName, cwd, typescript = false }) {
   ensureValidName(projectName, 'project');
 
-  const projectRoot = path.resolve(cwd, projectName);
+  const projectRoot = path.resolve(cwd);
   await assertCanCreateProject(projectRoot);
   await createBaseProjectFiles(projectRoot, projectName, { typescript });
 
-  console.log(`AegisNode project created at ${projectRoot}`);
+  console.log(`AegisNode project created in ${projectRoot}`);
   console.log('Next steps:');
-  console.log(`  cd ${projectName}`);
   console.log('  npm install');
   console.log('  aegisnode runserver');
 }
