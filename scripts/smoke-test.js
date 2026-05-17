@@ -1714,6 +1714,107 @@ export default {
   assert.match(helpersViewHtml, /<div id="class">Dashboard<\/div>/);
   await kernelWithHelpers.stop();
 
+  await fs.mkdir(path.join(projectRoot, 'loaders'), { recursive: true });
+  await fs.writeFile(
+    path.join(projectRoot, 'loaders', 'injection-check.js'),
+    `export default function injectionCheckLoader({ database, dbClient, models }) {\n  globalThis.__aegisLoaderInjectionCheck = {\n    hasDatabase: Object.prototype.hasOwnProperty.call(arguments[0] || {}, 'database'),\n    hasDbClient: Object.prototype.hasOwnProperty.call(arguments[0] || {}, 'dbClient'),\n    hasModels: Boolean(models),\n  };\n}\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'settings.js'),
+    `export default {\n  appName: 'blog',\n  env: 'development',\n  security: {\n    appSecret: '0123456789abcdef0123456789abcdef',\n  },\n  loaders: ['loaders/injection-check.js'],\n  apps: [\n    { name: 'users', mount: '/users' },\n  ],\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'models.js'),
+    `class UsersModel {\n  constructor(deps) {\n    this.info = {\n      hasDatabase: Object.prototype.hasOwnProperty.call(deps, 'database'),\n      hasDbClient: Object.prototype.hasOwnProperty.call(deps, 'dbClient'),\n    };\n  }\n\n  inspect() {\n    return this.info;\n  }\n}\n\nexport default {\n  users: UsersModel,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'services.js'),
+    `class UsersService {\n  constructor(deps) {\n    this.info = {\n      hasDatabase: Object.prototype.hasOwnProperty.call(deps, 'database'),\n      hasDbClient: Object.prototype.hasOwnProperty.call(deps, 'dbClient'),\n    };\n  }\n\n  inspect() {\n    return this.info;\n  }\n}\n\nexport default {\n  users: UsersService,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'validators.js'),
+    `class UsersValidator {\n  constructor(deps) {\n    this.info = {\n      hasDatabase: Object.prototype.hasOwnProperty.call(deps, 'database'),\n      hasDbClient: Object.prototype.hasOwnProperty.call(deps, 'dbClient'),\n    };\n  }\n\n  inspect() {\n    return this.info;\n  }\n}\n\nexport default {\n  users: UsersValidator,\n};\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'views.js'),
+    `class UsersView {\n  constructor(deps) {\n    this.info = {\n      hasDatabase: Object.prototype.hasOwnProperty.call(deps, 'database'),\n      hasDbClient: Object.prototype.hasOwnProperty.call(deps, 'dbClient'),\n    };\n  }\n\n  index(req, res) {\n    res.json(this.info);\n  }\n}\n\nexport default UsersView;\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'apps', 'users', 'subscribers.js'),
+    `export default function registerUsersSubscribers(context) {\n  globalThis.__aegisSubscriberInjectionCheck = {\n    hasDatabase: Object.prototype.hasOwnProperty.call(context, 'database'),\n    hasDbClient: Object.prototype.hasOwnProperty.call(context, 'dbClient'),\n    hasModels: Boolean(context.models),\n  };\n}\n`,
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(projectRoot, 'routes.js'),
+    `export default {\n  register(route) {\n    route.get('/injection/handler', (context, req, res, next) => {\n      const usersService = context.services.forApp('users').get('users');\n      const usersModel = context.models.forApp('users').get('users');\n      const usersValidator = context.validators.forApp('users').get('users');\n\n      res.json({\n        handlerHasDatabase: Object.prototype.hasOwnProperty.call(context, 'database'),\n        handlerHasDbClient: Object.prototype.hasOwnProperty.call(context, 'dbClient'),\n        reqHasDatabase: Object.prototype.hasOwnProperty.call(req.aegis, 'database'),\n        reqHasDbClient: Object.prototype.hasOwnProperty.call(req.aegis, 'dbClient'),\n        service: usersService.inspect(),\n        model: usersModel.inspect(),\n        validator: usersValidator.inspect(),\n      });\n    });\n\n    route.get('/injection/controller', 'users.views.index');\n  },\n};\n`,
+    'utf8',
+  );
+
+  delete globalThis.__aegisLoaderInjectionCheck;
+  delete globalThis.__aegisSubscriberInjectionCheck;
+
+  const kernelWithInjectionContract = await createKernel({
+    rootDir: projectRoot,
+    overrides: {
+      host: '127.0.0.1',
+      port: 0,
+    },
+  });
+
+  await kernelWithInjectionContract.start();
+  assert.deepEqual(globalThis.__aegisLoaderInjectionCheck, {
+    hasDatabase: false,
+    hasDbClient: false,
+    hasModels: true,
+  });
+  assert.deepEqual(globalThis.__aegisSubscriberInjectionCheck, {
+    hasDatabase: false,
+    hasDbClient: false,
+    hasModels: true,
+  });
+
+  const injectionAddress = kernelWithInjectionContract.context.server.address();
+  const injectionPort = typeof injectionAddress === 'object' && injectionAddress ? injectionAddress.port : 0;
+
+  const injectionHandlerResponse = await fetch(`http://127.0.0.1:${injectionPort}/injection/handler`);
+  assert.equal(injectionHandlerResponse.status, 200);
+  const injectionHandlerJson = await injectionHandlerResponse.json();
+  assert.deepEqual(injectionHandlerJson, {
+    handlerHasDatabase: false,
+    handlerHasDbClient: false,
+    reqHasDatabase: false,
+    reqHasDbClient: false,
+    service: {
+      hasDatabase: false,
+      hasDbClient: false,
+    },
+    model: {
+      hasDatabase: true,
+      hasDbClient: true,
+    },
+    validator: {
+      hasDatabase: false,
+      hasDbClient: false,
+    },
+  });
+
+  const injectionControllerResponse = await fetch(`http://127.0.0.1:${injectionPort}/injection/controller`);
+  assert.equal(injectionControllerResponse.status, 200);
+  const injectionControllerJson = await injectionControllerResponse.json();
+  assert.deepEqual(injectionControllerJson, {
+    hasDatabase: false,
+    hasDbClient: false,
+  });
+  await kernelWithInjectionContract.stop();
+  delete globalThis.__aegisLoaderInjectionCheck;
+  delete globalThis.__aegisSubscriberInjectionCheck;
+
   await fs.writeFile(
     path.join(projectRoot, 'routes.js'),
     `export default {\n  register(route) {\n    route.get('/limited', (req, res) => {\n      res.json({ ok: true });\n    });\n  },\n};\n`,

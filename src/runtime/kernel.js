@@ -961,8 +961,6 @@ function createLayerAccessors({ container, context }) {
           auth: context.auth,
           helpers: context.helpers,
           jlive: context.jlive,
-          dbClient: context.dbClient,
-          database: context.database,
         });
 
         validatorInstanceCache.set(token, validator);
@@ -988,24 +986,8 @@ function createLayerAccessors({ container, context }) {
   };
 }
 
-function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDefinition = null }) {
+function buildSharedRuntimeDependencies(context, appDefinition = null) {
   const appName = appDefinition?.name || null;
-
-  if (!strictLayers) {
-    return {
-      ...context,
-      app: appDefinition || null,
-      appName,
-      services: appName ? layerAccessors.servicesForApp(appName) : layerAccessors.services,
-      models: appName ? layerAccessors.modelsForApp(appName) : layerAccessors.models,
-      validators: appName ? layerAccessors.validatorsForApp(appName) : layerAccessors.validators,
-      env: context.env,
-      i18n: context.i18n,
-      mail: context.mail,
-      declaredAppNames: context.declaredAppNames,
-    };
-  }
-
   return {
     rootDir: context.rootDir,
     config: context.config,
@@ -1023,6 +1005,28 @@ function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDe
     declaredAppNames: context.declaredAppNames,
     app: appDefinition || null,
     appName,
+    container: context.container,
+    server: context.server,
+    templates: context.templates,
+    protocol: context.protocol,
+  };
+}
+
+function buildRouteRuntimeContext({ context, layerAccessors, strictLayers, appDefinition = null }) {
+  const appName = appDefinition?.name || null;
+  const baseContext = buildSharedRuntimeDependencies(context, appDefinition);
+
+  if (!strictLayers) {
+    return {
+      ...baseContext,
+      services: appName ? layerAccessors.servicesForApp(appName) : layerAccessors.services,
+      models: appName ? layerAccessors.modelsForApp(appName) : layerAccessors.models,
+      validators: appName ? layerAccessors.validatorsForApp(appName) : layerAccessors.validators,
+    };
+  }
+
+  return {
+    ...baseContext,
     services: appName ? layerAccessors.servicesForApp(appName) : layerAccessors.services,
     validators: appName ? layerAccessors.validatorsForApp(appName) : layerAccessors.validators,
   };
@@ -1054,8 +1058,6 @@ function bridgeRuntimeContextToRequest(req, runtimeContext = null, appName = nul
     services: runtimeContext.services,
     models: runtimeContext.models,
     validators: runtimeContext.validators,
-    database: runtimeContext.database,
-    dbClient: runtimeContext.dbClient,
   };
 
   for (const [key, value] of Object.entries(bindings)) {
@@ -1128,8 +1130,6 @@ function buildHandlerContext(req, runtimeContext = null, currentApp = null) {
     service,
     model,
     validator,
-    database: aegis.database ?? runtimeContext?.database ?? null,
-    dbClient: aegis.dbClient ?? runtimeContext?.dbClient ?? null,
   };
 }
 
@@ -1893,8 +1893,6 @@ function buildControllerDependencies({ appName, runtimeContext = null, container
     services: getScopedLayerAccessor(runtimeContext?.services, appName),
     models: getScopedLayerAccessor(runtimeContext?.models, appName),
     validators: getScopedLayerAccessor(runtimeContext?.validators, appName),
-    database: runtimeContext?.database,
-    dbClient: runtimeContext?.dbClient,
     container: runtimeContext?.container || container,
     app: runtimeContext?.app || null,
   };
@@ -2151,8 +2149,6 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
   const config = runtimeContext?.config || null;
   const logger = runtimeContext?.logger || null;
   const io = runtimeContext?.io || null;
-  const database = runtimeContext?.database || null;
-  const dbClient = runtimeContext?.dbClient ?? runtimeContext?.database?.client ?? null;
   const i18nConfig = normalizeI18nConfig(
     config?.i18n,
     runtimeContext?.rootDir || config?.rootDir || process.cwd(),
@@ -2226,12 +2222,6 @@ function attachRequestRuntimeBridge(expressApp, runtimeContext = null) {
       }
       if (!Object.prototype.hasOwnProperty.call(req.aegis, 'io')) {
         req.aegis.io = io;
-      }
-      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'database')) {
-        req.aegis.database = database;
-      }
-      if (!Object.prototype.hasOwnProperty.call(req.aegis, 'dbClient')) {
-        req.aegis.dbClient = dbClient;
       }
 
       const localeResolution = i18nConfig.enabled
@@ -2532,6 +2522,24 @@ async function registerServices({ appName, appRoot, container, logger }) {
   }
 }
 
+function buildSubscriberDependencies({ appName, context, services, models, validators }) {
+  return {
+    ...buildSharedRuntimeDependencies(context, { name: appName }),
+    services,
+    models,
+    validators,
+  };
+}
+
+function buildLoaderDependencies(context) {
+  return {
+    ...buildSharedRuntimeDependencies(context, null),
+    services: context.services,
+    models: context.models,
+    validators: context.validators,
+  };
+}
+
 async function registerSubscribers({ appName, appRoot, context, logger }) {
   const subscribersFile = resolveSourceFile(path.join(appRoot, 'subscribers'))
     || resolveSourceIndexFile(path.join(appRoot, 'subscribers'));
@@ -2544,7 +2552,7 @@ async function registerSubscribers({ appName, appRoot, context, logger }) {
   const register = loaded.default ?? loaded;
 
   if (typeof register === 'function') {
-    await register({ ...context, appName });
+    await register(context);
     logger.debug('Subscribers loaded for app %s', appName);
   }
 }
@@ -3478,7 +3486,7 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
   container.set('validators', layerAccessors.validators);
   const strictLayers = config.architecture.strictLayers === true;
 
-  await runLoaders(config.loaders, context, rootDir, logger);
+  await runLoaders(config.loaders, buildLoaderDependencies(context), rootDir, logger);
 
   const projectRoutes = await loadProjectRoutes(rootDir);
   if (strictLayers) {
@@ -3570,12 +3578,13 @@ export async function createKernel({ rootDir = process.cwd(), overrides = {} } =
     await registerSubscribers({
       appName: appDefinition.name,
       appRoot,
-      context: {
-        ...context,
+      context: buildSubscriberDependencies({
+        appName: appDefinition.name,
+        context,
         services: layerAccessors.servicesForApp(appDefinition.name),
         models: layerAccessors.modelsForApp(appDefinition.name),
         validators: layerAccessors.validatorsForApp(appDefinition.name),
-      },
+      }),
       logger,
     });
 

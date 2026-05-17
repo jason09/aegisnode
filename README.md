@@ -254,14 +254,14 @@ Injected runtime dependencies:
 AegisNode injects resolved runtime objects instead of asking app layers to import framework internals. `config` is the resolved runtime config from `settings.js` plus defaults and runtime overrides.
 
 Available by layer:
-- Views/handlers (`views.js` or any context-first route/controller action): `appName`, `app`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `service`, `model`, `validator`, `database`, `dbClient`
+- Views/handlers (`views.js` or any context-first route/controller action): `appName`, `app`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `service`, `model`, `validator`
 - Services (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `models`, `validators`, `services`
 - Models (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `helpers`, `jlive`, `dbClient`, `database`
-- Validators (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `dbClient`, `database`
-- Subscribers (`export default function ({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`
-- Controllers (`constructor({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `container`, `app`
-- Loaders (`loaders` entry function): `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`, `options`
-- Request bridge (`req.aegis`): `config`, `env`, `i18n`, `locale`, `localeSource`, `t`, `setLocale`, `logger`, `events`, `cache`, `io`, `auth`, `mail`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `database`, `dbClient`, `appName`, `app`
+- Validators (`constructor({ ... })`): `appName`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`
+- Subscribers (`export default function ({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`
+- Controllers (`constructor({ ... })`): `appName`, `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `container`, `app`
+- Loaders (`loaders` entry function): `rootDir`, `config`, `env`, `i18n`, `mail`, `logger`, `events`, `cache`, `io`, `auth`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `app`, `server`, `templates`, `protocol`, `container`, `declaredAppNames`, `options`
+- Request bridge (`req.aegis`): `config`, `env`, `i18n`, `locale`, `localeSource`, `t`, `setLocale`, `logger`, `events`, `cache`, `io`, `auth`, `mail`, `helpers`, `jlive`, `upload`, `services`, `models`, `validators`, `appName`, `app`
 - Template locals: `helpers`, `jlive`, `t`, `locale`, `i18n`, `money`, `number`, `dateTime`, `timeElapsed`, `timeDifference`, `breakStr`
 
 Key meanings:
@@ -278,7 +278,7 @@ Key meanings:
 | `io` | Socket.IO server instance when websocket support is enabled. |
 | `auth` | Auth manager for JWT/OAuth2 flows. |
 | `helpers` | Runtime helper functions such as `money`, `number`, `dateTime`, and `timeElapsed`. |
-| `jlive` | jlive bridge instance. |
+| `jlive` | jlive helper bridge instance (PHP-like helper library for Node.js). |
 | `upload` | Upload manager used by `route.upload`. |
 | `services` | Layer accessor used to fetch services by app/name. |
 | `models` | Layer accessor used to fetch models by app/name. |
@@ -286,8 +286,8 @@ Key meanings:
 | `service` | App-scoped convenience service for the current app only. |
 | `model` | App-scoped convenience model for the current app only. |
 | `validator` | App-scoped convenience validator for the current app only. |
-| `database` | Database runtime wrapper. |
-| `dbClient` | Low-level database/query client. |
+| `database` | Database runtime wrapper. Injected only into model constructors. |
+| `dbClient` | Low-level database/query client. Injected only into model constructors. |
 | `appName` | Current app name. |
 | `app` | Current app metadata/context. |
 | `rootDir` | Absolute project root. |
@@ -462,7 +462,7 @@ Passenger setup (Apache, Nginx, Plesk, cPanel, and similar hosts):
 4. Set environment variables. At minimum, make sure the resolved app env is production and let Passenger manage `PORT`.
 5. Restart the Node app from the hosting panel or service manager.
 
-Plesk note: these map to **Application Root** and **Application Startup File** fields.
+Note: these map to **Application Root** and **Application Startup File** fields.
 
 HTTPS note:
 - If TLS is terminated by Passenger, Apache, or Nginx, keep `https.enabled` off and use `trustProxy`.
@@ -1121,6 +1121,31 @@ curl -X POST http://127.0.0.1:3000/oauth/token \
   -d "code_verifier=<CODE_VERIFIER>"
 ```
 
+```js
+import axios from 'axios';
+
+const tokenResponse = await axios.post(
+  'http://127.0.0.1:3000/oauth/token',
+  new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: '<AUTH_CODE>',
+    redirect_uri: 'https://client.example.com/callback',
+    code_verifier: '<CODE_VERIFIER>',
+  }),
+  {
+    auth: {
+      username: 'web',
+      password: 'secret',
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  },
+);
+
+console.log(tokenResponse.data);
+```
+
 Response shape:
 
 ```json
@@ -1158,6 +1183,18 @@ curl http://127.0.0.1:3000/users/me \
   -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
+```js
+import axios from 'axios';
+
+const meResponse = await axios.get('http://127.0.0.1:3000/users/me', {
+  headers: {
+    Authorization: 'Bearer <ACCESS_TOKEN>',
+  },
+});
+
+console.log(meResponse.data);
+```
+
 4. Refresh token flow
 
 ```bash
@@ -1168,6 +1205,29 @@ curl -X POST http://127.0.0.1:3000/oauth/token \
   -d "refresh_token=<REFRESH_TOKEN>"
 ```
 
+```js
+import axios from 'axios';
+
+const refreshResponse = await axios.post(
+  'http://127.0.0.1:3000/oauth/token',
+  new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: '<REFRESH_TOKEN>',
+  }),
+  {
+    auth: {
+      username: 'web',
+      password: 'secret',
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  },
+);
+
+console.log(refreshResponse.data);
+```
+
 5. Client Credentials flow (machine-to-machine)
 
 ```bash
@@ -1176,6 +1236,29 @@ curl -X POST http://127.0.0.1:3000/oauth/token \
   -u machine:machine-secret \
   -d "grant_type=client_credentials" \
   -d "scope=read:users"
+```
+
+```js
+import axios from 'axios';
+
+const clientCredentialsResponse = await axios.post(
+  'http://127.0.0.1:3000/oauth/token',
+  new URLSearchParams({
+    grant_type: 'client_credentials',
+    scope: 'read:users',
+  }),
+  {
+    auth: {
+      username: 'machine',
+      password: 'machine-secret',
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  },
+);
+
+console.log(clientCredentialsResponse.data);
 ```
 
 This returns access token only (no refresh token).
@@ -1191,6 +1274,28 @@ curl -X POST http://127.0.0.1:3000/oauth/introspect \
   -d "token=<ACCESS_TOKEN>"
 ```
 
+```js
+import axios from 'axios';
+
+const introspectResponse = await axios.post(
+  'http://127.0.0.1:3000/oauth/introspect',
+  new URLSearchParams({
+    token: '<ACCESS_TOKEN>',
+  }),
+  {
+    auth: {
+      username: 'web',
+      password: 'secret',
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  },
+);
+
+console.log(introspectResponse.data);
+```
+
 Revocation:
 
 ```bash
@@ -1198,6 +1303,26 @@ curl -X POST http://127.0.0.1:3000/oauth/revoke \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -u web:secret \
   -d "token=<ACCESS_OR_REFRESH_TOKEN>"
+```
+
+```js
+import axios from 'axios';
+
+await axios.post(
+  'http://127.0.0.1:3000/oauth/revoke',
+  new URLSearchParams({
+    token: '<ACCESS_OR_REFRESH_TOKEN>',
+  }),
+  {
+    auth: {
+      username: 'web',
+      password: 'secret',
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  },
+);
 ```
 
 7. Custom subject/consent resolution
@@ -1501,6 +1626,7 @@ Notes:
 ### Helpers And jlive
 
 Helpers and the `jlive` bridge are available in request context (`req.aegis`) and in EJS locals.
+`jlive` is a PHP-like helper library for Node.js, not just a token generator. AegisNode exposes it so the same helper surface is available in handlers, services, models, subscribers, and templates.
 They are also available in:
 - Service constructors (`constructor({ helpers, jlive, env, i18n, models, ... })`)
 - Model constructors (`constructor({ helpers, jlive, env, i18n, dbClient, ... })`)
@@ -1579,8 +1705,9 @@ Mongo id helpers:
 - `toObjectId(value)` returns a Mongo ObjectId instance or `null` when invalid.
 
 `jlive` behavior:
-- If `jlive` package is installed, bridge uses its methods.
-- If not installed, `jlive.generate()` still works (crypto fallback), while crypto methods throw `JLIVE_UNAVAILABLE`.
+- If the `jlive` package is installed, the bridge exposes its helper methods.
+- If `jlive` is not installed, AegisNode still provides `jlive.generate()` as a crypto-based fallback.
+- Other `jlive` methods depend on the real package and throw `JLIVE_UNAVAILABLE` when that package is absent.
 
 ### Template Locals From Settings
 
@@ -2224,8 +2351,6 @@ Injected middleware context can include:
 - `service`
 - `model`
 - `validator`
-- `database`
-- `dbClient`
 
 Auth middleware example:
 
