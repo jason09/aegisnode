@@ -83,9 +83,17 @@ function parseEnvContent(content) {
   return parsed;
 }
 
-function applyEnvEntries(entries) {
+function applyEnvEntries(entries, { logger = null, sourcePath = '' } = {}) {
   for (const [key, value] of Object.entries(entries)) {
     if (BASE_PROCESS_ENV.has(key)) {
+      if (logger && key === 'NODE_ENV' && String(BASE_PROCESS_ENV.get(key) || '') !== String(value || '')) {
+        logger.warn(
+          'Environment file %s defines NODE_ENV=%s but the current process already started with NODE_ENV=%s. The existing process value wins; update your host/process manager env if you want settings.js to resolve a different env.',
+          sourcePath,
+          value,
+          BASE_PROCESS_ENV.get(key),
+        );
+      }
       continue;
     }
 
@@ -100,7 +108,7 @@ function loadEnvFile(filePath, logger = null) {
   }
 
   const parsed = parseEnvContent(fs.readFileSync(filePath, 'utf8'));
-  applyEnvEntries(parsed);
+  applyEnvEntries(parsed, { logger, sourcePath: filePath });
 
   if (logger) {
     logger.debug('Environment file loaded: %s', filePath);

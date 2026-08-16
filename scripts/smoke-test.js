@@ -1,4 +1,5 @@
 import assert from 'assert';
+import { spawnSync } from 'child_process';
 import crypto from 'crypto';
 import http from 'http';
 import https from 'https';
@@ -293,7 +294,8 @@ async function main() {
   await startProject({ projectName: dotenvProjectName, cwd: dotenvProjectRoot });
   await fs.writeFile(
     path.join(dotenvProjectRoot, '.env'),
-    `AEGIS_TEST_HOST=127.0.0.1
+    `NODE_ENV=production
+AEGIS_TEST_HOST=127.0.0.1
 AEGIS_TEST_PORT=4321
 AEGIS_TEST_LOG_LEVEL=warn
 AEGIS_TEST_APP_SECRET=test-dotenv-secret
@@ -318,10 +320,33 @@ AEGIS_TEST_APP_SECRET=test-dotenv-secret
     'utf8',
   );
   const dotenvConfig = await loadProjectConfig(dotenvProjectRoot);
+  assert.equal(dotenvConfig.env, 'production');
   assert.equal(dotenvConfig.host, '127.0.0.1');
   assert.equal(dotenvConfig.port, 4321);
   assert.equal(dotenvConfig.logging.level, 'warn');
   assert.equal(dotenvConfig.security.appSecret, 'test-dotenv-secret');
+  const envConflictResult = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { createLogger } from ${JSON.stringify(path.join(frameworkRoot, 'src/runtime/logger.js'))};
+import { loadProjectConfig } from ${JSON.stringify(path.join(frameworkRoot, 'src/runtime/config.js'))};
+await loadProjectConfig(${JSON.stringify(dotenvProjectRoot)}, createLogger({ level: 'warn', name: 'smoke' }));`,
+    ],
+    {
+      env: {
+        ...process.env,
+        NODE_ENV: 'development',
+      },
+      encoding: 'utf8',
+    },
+  );
+  assert.equal(envConflictResult.status, 0);
+  assert.match(
+    envConflictResult.stderr,
+    /defines NODE_ENV=.*current process already started with NODE_ENV=/,
+  );
 
   const httpsProjectName = 'httpsdemo';
   const httpsProjectRoot = path.join(httpsSandboxRoot, httpsProjectName);
